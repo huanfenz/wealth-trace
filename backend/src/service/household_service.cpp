@@ -1,3 +1,4 @@
+// 家庭服务实现：家庭的新建、查询、重命名与首次启动的默认家庭保证。
 #include "service/household_service.hpp"
 
 #include <cstdint>
@@ -13,6 +14,7 @@ namespace wt {
 
 Household HouseholdService::create(const std::string& name) {
   Household household;
+  // 名称做去空白与长度校验；创建/更新时间统一用 UTC 格式，二者初始相同。
   household.name = strings::require_text(name, "name", 100);
   household.created_at = time_util::now_iso8601();
   household.updated_at = household.created_at;
@@ -31,6 +33,7 @@ Household HouseholdService::get(std::int64_t id) {
 }
 
 Household HouseholdService::update(std::int64_t id, const std::string& name) {
+  // 先取原记录（不存在即抛 not_found），只改名称与 updated_at。
   Household household = get(id);
   household.name = strings::require_text(name, "name", 100);
   household.updated_at = time_util::now_iso8601();
@@ -39,6 +42,8 @@ Household HouseholdService::update(std::int64_t id, const std::string& name) {
 }
 
 Household HouseholdService::ensure_default(const std::string& name) {
+  // 空库时懒创建默认家庭；已有家庭则复用第一个，使调用方幂等，
+  // 不会因重复启动而制造出多个家庭。
   if (households_.count() == 0) {
     return create(name);
   }

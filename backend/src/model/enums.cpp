@@ -1,11 +1,14 @@
 #include "model/enums.hpp"
 
+// 枚举转换实现：维护枚举与数据库大写字符串之间的双向映射。
+
 #include <iterator>
 #include <utility>
 
 namespace wt {
 namespace {
 
+// 在一张 (字符串, 枚举) 表中线性查找匹配项；未命中返回 nullopt。
 template <typename Enum>
 std::optional<Enum> parse_enum(std::string_view text,
                                const std::pair<std::string_view, Enum>* table,
@@ -18,6 +21,7 @@ std::optional<Enum> parse_enum(std::string_view text,
   return std::nullopt;
 }
 
+// 各枚举的持久化字符串表。使用 constexpr 编译期常量，避免运行时构造开销。
 constexpr std::pair<std::string_view, MemberRole> kMemberRoles[] = {
     {"OWNER", MemberRole::Owner}, {"MEMBER", MemberRole::Member}};
 constexpr std::pair<std::string_view, MemberStatus> kMemberStatuses[] = {
@@ -47,6 +51,8 @@ constexpr std::pair<std::string_view, TermUnit> kTermUnits[] = {
 
 }  // namespace
 
+// 以下 to_string：把枚举写成数据库存储用的大写字符串。
+// switch 之后的返回值是兜底，正常情况下不可达（所有枚举分支均已覆盖）。
 std::string_view to_string(MemberRole value) {
   return value == MemberRole::Owner ? "OWNER" : "MEMBER";
 }
@@ -102,6 +108,7 @@ std::string_view to_string(TermUnit value) {
   return "YEAR";
 }
 
+// 以下 parse_*：把数据库字符串解析回枚举，未知取值统一返回 nullopt。
 std::optional<MemberRole> parse_member_role(std::string_view text) {
   return parse_enum(text, kMemberRoles, std::size(kMemberRoles));
 }
@@ -128,6 +135,7 @@ std::optional<TermUnit> parse_term_unit(std::string_view text) {
 }
 
 std::int64_t transaction_delta(TransactionType type, std::int64_t amount) {
+  // 符号规则：收入/转入/调账为增量，支出/转出为减量；调账的 amount 自身可为负。
   switch (type) {
     case TransactionType::Income:
     case TransactionType::TransferIn:

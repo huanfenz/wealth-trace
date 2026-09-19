@@ -1,3 +1,4 @@
+<!-- 成员管理页：列出家庭成员，可通过弹窗新增或编辑（姓名、角色、状态）。 -->
 <template>
   <div>
     <div class="toolbar">
@@ -57,6 +58,7 @@
 </template>
 
 <script setup lang="ts">
+// 职责：展示/维护成员列表；弹窗表单用于新增或编辑，保存后刷新 store 中的成员缓存。
 import { reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
@@ -67,17 +69,19 @@ import { memberRoleLabels, memberStatusLabels } from '@/utils/labels'
 import type { Member, MemberRole, MemberStatus } from '@/types'
 
 const store = useAppStore()
-const loading = ref(false)
-const saving = ref(false)
-const dialogVisible = ref(false)
-const editing = ref<Member | null>(null)
+const loading = ref(false)        // 列表加载中
+const saving = ref(false)         // 表单提交中
+const dialogVisible = ref(false)  // 弹窗显隐
+const editing = ref<Member | null>(null) // 当前编辑对象，null 表示新增
 
+// 弹窗表单数据。
 const form = reactive({
   name: '',
   role: 'MEMBER' as MemberRole,
   status: 'ACTIVE' as MemberStatus,
 })
 
+// 打开「新增」弹窗并重置表单为默认值。
 function openCreate() {
   editing.value = null
   form.name = ''
@@ -86,6 +90,7 @@ function openCreate() {
   dialogVisible.value = true
 }
 
+// 打开「编辑」弹窗并回填选中成员的数据。
 function openEdit(member: Member) {
   editing.value = member
   form.name = member.name
@@ -94,6 +99,7 @@ function openEdit(member: Member) {
   dialogVisible.value = true
 }
 
+// 校验后按编辑/新增分支提交，成功后关闭弹窗并刷新成员列表。
 async function save() {
   if (!form.name.trim()) {
     ElMessage.warning('请填写姓名')

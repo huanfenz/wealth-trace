@@ -1,3 +1,4 @@
+// 业务 API 集合：按资源（家庭/成员/账户/资产/交易/统计）封装对后端的请求。
 import { get, post, put } from './http'
 import type {
   Account,
@@ -11,24 +12,29 @@ import type {
   Transaction,
 } from '@/types'
 
+/** 获取全局元数据（枚举、分类、金额与利率精度等）。 */
 export function getMeta(): Promise<Meta> {
   return get<Meta>('/meta')
 }
 
-// --- households -----------------------------------------------------------
+// --- households（家庭） ----------------------------------------------------
 
+/** 获取家庭列表。 */
 export function listHouseholds(): Promise<Household[]> {
   return get<Household[]>('/households')
 }
 
+/** 按 ID 获取单个家庭。 */
 export function getHousehold(id: number): Promise<Household> {
   return get<Household>(`/households/${id}`)
 }
 
+/** 新建家庭。 */
 export function createHousehold(body: Record<string, unknown>): Promise<Household> {
   return post<Household>('/households', body)
 }
 
+/** 更新家庭信息。 */
 export function updateHousehold(
   id: number,
   body: Record<string, unknown>,
@@ -36,12 +42,14 @@ export function updateHousehold(
   return put<Household>(`/households/${id}`, body)
 }
 
-// --- members --------------------------------------------------------------
+// --- members（成员） ------------------------------------------------------
 
+/** 获取指定家庭的成员列表。 */
 export function listMembers(householdId: number): Promise<Member[]> {
   return get<Member[]>(`/households/${householdId}/members`)
 }
 
+/** 在指定家庭下新建成员。 */
 export function createMember(
   householdId: number,
   body: Record<string, unknown>,
@@ -49,12 +57,14 @@ export function createMember(
   return post<Member>(`/households/${householdId}/members`, body)
 }
 
+/** 更新成员信息。 */
 export function updateMember(id: number, body: Record<string, unknown>): Promise<Member> {
   return put<Member>(`/members/${id}`, body)
 }
 
-// --- accounts -------------------------------------------------------------
+// --- accounts（账户） -----------------------------------------------------
 
+/** 获取账户列表，可按属主成员筛选。 */
 export function listAccounts(
   householdId: number,
   ownerMemberId?: number,
@@ -64,6 +74,7 @@ export function listAccounts(
   })
 }
 
+/** 在指定家庭下新建账户。 */
 export function createAccount(
   householdId: number,
   body: Record<string, unknown>,
@@ -71,6 +82,7 @@ export function createAccount(
   return post<Account>(`/households/${householdId}/accounts`, body)
 }
 
+/** 更新账户信息。 */
 export function updateAccount(
   id: number,
   body: Record<string, unknown>,
@@ -78,8 +90,9 @@ export function updateAccount(
   return put<Account>(`/accounts/${id}`, body)
 }
 
-// --- assets ---------------------------------------------------------------
+// --- assets（资产） -------------------------------------------------------
 
+/** 获取资产列表，可按成员或账户筛选。 */
 export function listAssets(
   householdId: number,
   params: { ownerMemberId?: number; accountId?: number },
@@ -90,10 +103,12 @@ export function listAssets(
   })
 }
 
+/** 按 ID 获取单个资产（含对应类型的明细块）。 */
 export function getAsset(id: number): Promise<Asset> {
   return get<Asset>(`/assets/${id}`)
 }
 
+/** 在指定家庭下新建资产。 */
 export function createAsset(
   householdId: number,
   body: Record<string, unknown>,
@@ -101,14 +116,17 @@ export function createAsset(
   return post<Asset>(`/households/${householdId}/assets`, body)
 }
 
+/** 更新资产基本信息。 */
 export function updateAsset(id: number, body: Record<string, unknown>): Promise<Asset> {
   return put<Asset>(`/assets/${id}`, body)
 }
 
+/** 更新资产状态（ACTIVE/CLOSED）。 */
 export function updateAssetStatus(id: number, status: string): Promise<Asset> {
   return put<Asset>(`/assets/${id}/status`, { status })
 }
 
+/** 更新资产对应类型的明细块（定期/基金/债券/保险）。 */
 export function updateAssetDetail(
   id: number,
   body: Record<string, unknown>,
@@ -116,18 +134,20 @@ export function updateAssetDetail(
   return put<Asset>(`/assets/${id}/detail`, body)
 }
 
-// --- transactions ---------------------------------------------------------
+// --- transactions（收支与转账） ------------------------------------------
 
+/** 交易列表查询条件。 */
 export interface TransactionQuery {
-  ownerMemberId?: number
-  assetId?: number
-  type?: string
-  from?: string
-  to?: string
-  limit?: number
-  offset?: number
+  ownerMemberId?: number // 按成员筛选
+  assetId?: number       // 按资产筛选
+  type?: string          // 按交易类型筛选
+  from?: string          // 起始时间（含）
+  to?: string            // 结束时间（含）
+  limit?: number         // 每页条数
+  offset?: number        // 偏移量（分页）
 }
 
+/** 分页查询交易流水。 */
 export function listTransactions(
   householdId: number,
   query: TransactionQuery,
@@ -143,6 +163,7 @@ export function listTransactions(
   })
 }
 
+/** 记录一笔收入。 */
 export function recordIncome(
   householdId: number,
   body: Record<string, unknown>,
@@ -150,6 +171,7 @@ export function recordIncome(
   return post<Transaction>(`/households/${householdId}/transactions/income`, body)
 }
 
+/** 记录一笔支出。 */
 export function recordExpense(
   householdId: number,
   body: Record<string, unknown>,
@@ -157,6 +179,7 @@ export function recordExpense(
   return post<Transaction>(`/households/${householdId}/transactions/expense`, body)
 }
 
+/** 记录一次余额调整（金额可为负）。 */
 export function recordAdjustment(
   householdId: number,
   body: Record<string, unknown>,
@@ -164,6 +187,7 @@ export function recordAdjustment(
   return post<Transaction>(`/households/${householdId}/transactions/adjustment`, body)
 }
 
+/** 在两个资产间转账，后端生成转出/转入两条流水。 */
 export function transfer(
   householdId: number,
   body: Record<string, unknown>,
@@ -174,8 +198,9 @@ export function transfer(
   )
 }
 
-// --- statistics -----------------------------------------------------------
+// --- statistics（统计） ---------------------------------------------------
 
+/** 获取家庭总览统计（净资产、收支、按成员/账户/类型汇总）。 */
 export function getOverview(
   householdId: number,
   params: { year?: number; month?: number },
@@ -186,6 +211,7 @@ export function getOverview(
   })
 }
 
+/** 获取指定时间区间的收支统计，可按成员筛选。 */
 export function getPeriod(
   householdId: number,
   params: { from: string; to: string; ownerMemberId?: number },

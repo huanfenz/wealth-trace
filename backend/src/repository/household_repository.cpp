@@ -1,3 +1,4 @@
+// household_repository.cpp：household 表的 CRUD SQL 实现与行映射。
 #include "repository/household_repository.hpp"
 
 #include <cstdint>
@@ -11,6 +12,8 @@
 namespace wt {
 namespace {
 
+// 行映射：列下标必须与 kSelectColumns 的顺序严格一致。
+// 0=id 1=name 2=created_at 3=updated_at
 Household map_household(Statement& statement) {
   Household household;
   household.id = statement.get_int64(0);
@@ -20,10 +23,12 @@ Household map_household(Statement& statement) {
   return household;
 }
 
+// SELECT 列顺序，与 map_household 的下标一一对应，供 find_by_id/list 复用。
 constexpr const char* kSelectColumns = "id, name, created_at, updated_at";
 
 }  // namespace
 
+// 插入家庭（预处理 + 参数绑定），返回自增主键。
 std::int64_t HouseholdRepository::create(const Household& household) {
   Statement statement(database_,
                       "INSERT INTO household (name, created_at, updated_at) "

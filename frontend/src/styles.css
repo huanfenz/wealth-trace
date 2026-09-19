@@ -1,7 +1,8 @@
+/* 全局基础样式：定义主题色变量、重置盒模型，并提供金额与工具栏等通用类。 */
 :root {
-  --wt-bg: #f5f7fa;
-  --wt-brand: #2f6fed;
-  --wt-text: #1f2d3d;
+  --wt-bg: #f5f7fa;      /* 页面背景色 */
+  --wt-brand: #2f6fed;   /* 品牌主色 */
+  --wt-text: #1f2d3d;    /* 主文字色 */
 }
 
 * {
@@ -22,6 +23,7 @@ body {
   color: var(--wt-text);
 }
 
+/* 金额展示：等宽数字对齐，负数红色、正数深色。 */
 .amount {
   font-variant-numeric: tabular-nums;
   font-weight: 600;

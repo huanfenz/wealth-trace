@@ -1,5 +1,8 @@
 #pragma once
 
+// 领域实体：与数据库表一一对应的数据结构。金额一律用最小货币单位整数（人民币「分」，
+// 1 元 = 100 分），C++ 用 std::int64_t、SQLite 用 INTEGER；时间统一为 UTC 字符串。
+
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -8,115 +11,126 @@
 
 namespace wt {
 
+// 家庭：多租户隔离的顶层单位。
 struct Household {
-  std::int64_t id = 0;
-  std::string name;
-  std::string created_at;
-  std::string updated_at;
+  std::int64_t id = 0;     // 主键
+  std::string name;        // 家庭名称
+  std::string created_at;  // 创建时间，UTC "YYYY-MM-DD HH:MM:SS"
+  std::string updated_at;  // 更新时间，UTC "YYYY-MM-DD HH:MM:SS"
 };
 
+// 家庭成员。
 struct HouseholdMember {
-  std::int64_t id = 0;
-  std::int64_t household_id = 0;
-  std::string name;
-  MemberRole role = MemberRole::Member;
-  MemberStatus status = MemberStatus::Active;
-  std::string created_at;
-  std::string updated_at;
+  std::int64_t id = 0;           // 主键
+  std::int64_t household_id = 0; // 所属家庭
+  std::string name;              // 成员姓名
+  MemberRole role = MemberRole::Member;        // 角色：Owner=户主，Member=普通成员
+  MemberStatus status = MemberStatus::Active;  // 状态：Active=启用，Inactive=停用
+  std::string created_at;                      // 创建时间，UTC "YYYY-MM-DD HH:MM:SS"
+  std::string updated_at;                      // 更新时间，UTC "YYYY-MM-DD HH:MM:SS"
 };
 
+// 账户：资产属主的逻辑来源。
 struct Account {
-  std::int64_t id = 0;
-  std::int64_t household_id = 0;
-  std::int64_t owner_member_id = 0;
-  std::string name;
-  AccountType type = AccountType::Bank;
-  std::optional<std::string> institution_name;
-  std::optional<std::string> account_no_masked;
-  std::optional<std::string> remark;
-  bool enabled = true;
-  std::string created_at;
-  std::string updated_at;
+  std::int64_t id = 0;              // 主键
+  std::int64_t household_id = 0;    // 所属家庭。冗余字段：从属主派生，便于按家庭直接过滤、减少联表
+  std::int64_t owner_member_id = 0; // 户主成员。冗余字段：便于按成员过滤/聚合，避免大量联表查询
+  std::string name;                 // 账户名称
+  AccountType type = AccountType::Bank;         // 账户类型
+  std::optional<std::string> institution_name;  // 机构名称（可空）
+  std::optional<std::string> account_no_masked; // 脱敏后的账号（可空）
+  std::optional<std::string> remark;            // 备注（可空）
+  bool enabled = true;                          // 是否启用
+  std::string created_at;                       // 创建时间，UTC "YYYY-MM-DD HH:MM:SS"
+  std::string updated_at;                       // 更新时间，UTC "YYYY-MM-DD HH:MM:SS"
 };
 
+// 资产：余额与流水变化的主体；current_balance 是唯一的当前价值来源。
 struct Asset {
-  std::int64_t id = 0;
-  std::int64_t household_id = 0;
-  std::int64_t owner_member_id = 0;
-  std::int64_t account_id = 0;
-  std::string name;
-  AssetType asset_type = AssetType::Cash;
-  std::int64_t opening_balance = 0;
-  std::int64_t current_balance = 0;
-  AssetStatus status = AssetStatus::Active;
-  std::optional<std::string> remark;
-  std::string created_at;
-  std::string updated_at;
+  std::int64_t id = 0;              // 主键
+  std::int64_t household_id = 0;    // 所属家庭。冗余字段：便于按家庭过滤/统计
+  std::int64_t owner_member_id = 0; // 所属成员。冗余字段：来自账户，便于按成员过滤/统计
+  std::int64_t account_id = 0;      // 所属账户
+  std::string name;                 // 资产名称
+  AssetType asset_type = AssetType::Cash;      // 资产类型
+  std::int64_t opening_balance = 0;            // 期初金额（分）
+  std::int64_t current_balance = 0;            // 当前金额（分）：负债为负值，正资产为非负；
+                                               // 恒满足 current_balance = opening_balance + Σ transaction_delta
+  AssetStatus status = AssetStatus::Active;    // 状态：Active=持有，Closed=已关闭
+  std::optional<std::string> remark;           // 备注（可空）
+  std::string created_at;                      // 创建时间，UTC "YYYY-MM-DD HH:MM:SS"
+  std::string updated_at;                      // 更新时间，UTC "YYYY-MM-DD HH:MM:SS"
 };
 
+// 定期存款扩展信息（asset_type = TERM_DEPOSIT 时使用）。
 struct TermDepositDetail {
-  std::int64_t asset_id = 0;
-  std::int64_t principal = 0;
-  std::int64_t annual_interest_rate = 0;  // scaled by 1e6
-  std::optional<std::string> start_date;
-  std::optional<std::string> maturity_date;
-  std::optional<std::int64_t> term_value;
-  std::optional<TermUnit> term_unit;
-  std::optional<std::string> interest_type;
-  bool auto_rollover = false;
-  std::optional<std::string> maturity_action;
+  std::int64_t asset_id = 0;             // 对应资产 id
+  std::int64_t principal = 0;            // 本金（分）
+  std::int64_t annual_interest_rate = 0; // 年利率，定点整数，RATE_SCALE=1000000（1.85% 存为 18500）
+  std::optional<std::string> start_date;    // 起息日 "YYYY-MM-DD"（可空）
+  std::optional<std::string> maturity_date; // 到期日 "YYYY-MM-DD"（可空）
+  std::optional<std::int64_t> term_value;   // 存期数值（可空）
+  std::optional<TermUnit> term_unit;        // 存期单位：Day/Month/Year（可空）
+  std::optional<std::string> interest_type; // 计息方式（可空）
+  bool auto_rollover = false;               // 是否自动转存
+  std::optional<std::string> maturity_action; // 到期处理方式（可空）
 };
 
+// 基金扩展信息（asset_type = FUND 时使用）。
 struct FundDetail {
-  std::int64_t asset_id = 0;
-  std::optional<std::string> fund_code;
-  std::optional<std::string> fund_name;
-  std::optional<std::string> fund_type;
-  std::optional<std::string> lock_start_date;
-  std::optional<std::string> lock_end_date;
+  std::int64_t asset_id = 0;                   // 对应资产 id
+  std::optional<std::string> fund_code;        // 基金代码（可空）
+  std::optional<std::string> fund_name;        // 基金名称（可空）
+  std::optional<std::string> fund_type;        // 基金类型（可空）
+  std::optional<std::string> lock_start_date;  // 锁定期开始日 "YYYY-MM-DD"（可空）
+  std::optional<std::string> lock_end_date;    // 锁定期结束日 "YYYY-MM-DD"（可空）
 };
 
+// 债券扩展信息（asset_type = BOND 时使用）。
 struct BondDetail {
-  std::int64_t asset_id = 0;
-  std::optional<std::string> bond_code;
-  std::optional<std::string> bond_name;
-  std::int64_t principal = 0;
-  std::int64_t annual_coupon_rate = 0;  // scaled by 1e6
-  std::optional<std::string> purchase_date;
-  std::optional<std::string> maturity_date;
-  std::optional<std::string> lock_end_date;
+  std::int64_t asset_id = 0;                 // 对应资产 id
+  std::optional<std::string> bond_code;      // 债券代码（可空）
+  std::optional<std::string> bond_name;      // 债券名称（可空）
+  std::int64_t principal = 0;                // 本金（分）
+  std::int64_t annual_coupon_rate = 0;       // 年票息率，定点整数，RATE_SCALE=1000000
+  std::optional<std::string> purchase_date;  // 买入日 "YYYY-MM-DD"（可空）
+  std::optional<std::string> maturity_date;  // 到期日 "YYYY-MM-DD"（可空）
+  std::optional<std::string> lock_end_date;  // 锁定期结束日 "YYYY-MM-DD"（可空）
 };
 
+// 保险扩展信息（asset_type = INSURANCE 时使用）。
 struct InsuranceDetail {
-  std::int64_t asset_id = 0;
-  std::optional<std::string> policy_no;
-  std::optional<std::string> insurance_company;
-  std::optional<std::string> product_name;
-  std::optional<std::string> insurance_type;
-  std::optional<std::string> effective_date;
-  std::optional<std::string> maturity_date;
-  std::int64_t annual_premium = 0;
-  std::int64_t total_paid_premium = 0;
-  std::int64_t insured_amount = 0;
-  std::optional<std::int64_t> payment_years;
+  std::int64_t asset_id = 0;                    // 对应资产 id
+  std::optional<std::string> policy_no;         // 保单号（可空）
+  std::optional<std::string> insurance_company; // 保险公司（可空）
+  std::optional<std::string> product_name;      // 产品名称（可空）
+  std::optional<std::string> insurance_type;    // 保险类型（可空）
+  std::optional<std::string> effective_date;    // 生效日 "YYYY-MM-DD"（可空）
+  std::optional<std::string> maturity_date;     // 到期日 "YYYY-MM-DD"（可空）
+  std::int64_t annual_premium = 0;              // 年缴保费（分）
+  std::int64_t total_paid_premium = 0;          // 累计已缴保费（分）
+  std::int64_t insured_amount = 0;              // 保额（分）
+  std::optional<std::int64_t> payment_years;    // 缴费年限（可空）
 };
 
+// 交易流水：任何 Asset.current_balance 的变化都必须产生一条交易记录。
 struct Transaction {
-  std::int64_t id = 0;
-  std::int64_t household_id = 0;
-  std::int64_t owner_member_id = 0;
-  std::int64_t asset_id = 0;
-  TransactionType type = TransactionType::Expense;
-  std::optional<std::string> category;
-  std::int64_t amount = 0;
-  std::optional<std::int64_t> transfer_group_id;
-  std::optional<std::int64_t> balance_before;
-  std::optional<std::int64_t> balance_after;
-  std::string transaction_time;
-  std::optional<std::string> remark;
-  TransactionStatus status = TransactionStatus::Normal;
-  std::string created_at;
-  std::string updated_at;
+  std::int64_t id = 0;              // 主键
+  std::int64_t household_id = 0;    // 所属家庭。冗余字段：便于按家庭过滤/统计
+  std::int64_t owner_member_id = 0; // 所属成员。冗余自动从 Asset 取得，便于按成员过滤/统计
+  std::int64_t asset_id = 0;        // 关联资产
+  TransactionType type = TransactionType::Expense; // 交易类型
+  std::optional<std::string> category;             // 分类（可空）
+  std::int64_t amount = 0;          // 金额（分）：常规类型恒为正；ADJUSTMENT 时 amount 本身可为负
+  std::optional<std::int64_t> transfer_group_id;   // 转账组 id：一次转账拆成
+                                                   // TRANSFER_OUT/TRANSFER_IN 两条并共用同一值以便关联，非转账为空
+  std::optional<std::int64_t> balance_before;      // 交易前资产余额快照（分，可空）
+  std::optional<std::int64_t> balance_after;       // 交易后资产余额快照（分，可空）
+  std::string transaction_time;     // 交易发生时间，UTC "YYYY-MM-DD HH:MM:SS"
+  std::optional<std::string> remark; // 备注（可空）
+  TransactionStatus status = TransactionStatus::Normal; // 状态：Normal=有效，Void=已作废
+  std::string created_at;           // 创建时间，UTC "YYYY-MM-DD HH:MM:SS"
+  std::string updated_at;           // 更新时间，UTC "YYYY-MM-DD HH:MM:SS"
 };
 
 }  // namespace wt

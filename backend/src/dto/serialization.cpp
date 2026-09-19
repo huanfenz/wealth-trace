@@ -1,3 +1,4 @@
+// DTO 序列化实现。金额一律为「分」，负债为负值；可选值缺省时输出 JSON null。
 #include "dto/serialization.hpp"
 
 #include <optional>
@@ -8,16 +9,19 @@
 namespace wt::dto {
 namespace {
 
+// 可选字符串 -> JSON：有值输出字符串，无值输出 null。
 nlohmann::json optional_text(const std::optional<std::string>& value) {
   return value.has_value() ? nlohmann::json(*value) : nlohmann::json(nullptr);
 }
 
+// 可选整数 -> JSON：有值输出数字，无值输出 null。
 nlohmann::json optional_int(const std::optional<std::int64_t>& value) {
   return value.has_value() ? nlohmann::json(*value) : nlohmann::json(nullptr);
 }
 
 }  // namespace
 
+// 家庭：id / 名称 / 创建与更新时间。
 nlohmann::json to_json(const Household& household) {
   return {{"id", household.id},
           {"name", household.name},
@@ -25,6 +29,7 @@ nlohmann::json to_json(const Household& household) {
           {"updated_at", household.updated_at}};
 }
 
+// 成员：role / status 以枚举名字符串输出。
 nlohmann::json to_json(const HouseholdMember& member) {
   return {{"id", member.id},
           {"household_id", member.household_id},
@@ -35,6 +40,7 @@ nlohmann::json to_json(const HouseholdMember& member) {
           {"updated_at", member.updated_at}};
 }
 
+// 账户：type 为枚举名，机构 / 掩码卡号 / 备注为可选（无值输出 null）。
 nlohmann::json to_json(const Account& account) {
   return {{"id", account.id},
           {"household_id", account.household_id},
@@ -49,6 +55,7 @@ nlohmann::json to_json(const Account& account) {
           {"updated_at", account.updated_at}};
 }
 
+// 账户视图：在账户 JSON 上追加 balance（余额，分）与 asset_count（资产数）。
 nlohmann::json to_json(const AccountView& view) {
   auto json = to_json(view.account);
   json["balance"] = view.balance;
@@ -56,6 +63,8 @@ nlohmann::json to_json(const AccountView& view) {
   return json;
 }
 
+// 资产：asset_type / status 为枚举名；opening_balance 与 current_balance
+// 单位为分，负债类资产为负值；备注可选。
 nlohmann::json to_json(const Asset& asset) {
   return {{"id", asset.id},
           {"household_id", asset.household_id},
@@ -71,6 +80,9 @@ nlohmann::json to_json(const Asset& asset) {
           {"updated_at", asset.updated_at}};
 }
 
+// 定期存款明细：principal 本金（分）、annual_interest_rate 年利率（定点整数，
+// 除以 RATE_SCALE=1000000 得到小数），日期为可空字符串，term_unit 为枚举名，
+// term_value 存期数值可选，auto_rollover 是否自动转存。
 nlohmann::json to_json(const TermDepositDetail& detail) {
   nlohmann::json json;
   json["asset_id"] = detail.asset_id;
@@ -88,6 +100,7 @@ nlohmann::json to_json(const TermDepositDetail& detail) {
   return json;
 }
 
+// 基金明细：代码 / 名称 / 类型与锁定期起止日期均可选。
 nlohmann::json to_json(const FundDetail& detail) {
   return {{"asset_id", detail.asset_id},
           {"fund_code", optional_text(detail.fund_code)},
@@ -97,6 +110,7 @@ nlohmann::json to_json(const FundDetail& detail) {
           {"lock_end_date", optional_text(detail.lock_end_date)}};
 }
 
+// 债券明细：principal 本金（分），annual_coupon_rate 票面利率（定点整数）。
 nlohmann::json to_json(const BondDetail& detail) {
   return {{"asset_id", detail.asset_id},
           {"bond_code", optional_text(detail.bond_code)},
@@ -108,6 +122,7 @@ nlohmann::json to_json(const BondDetail& detail) {
           {"lock_end_date", optional_text(detail.lock_end_date)}};
 }
 
+// 保险明细：保费 / 已缴 / 保额均为「分」，payment_years 缴费年限可选。
 nlohmann::json to_json(const InsuranceDetail& detail) {
   return {{"asset_id", detail.asset_id},
           {"policy_no", optional_text(detail.policy_no)},
@@ -122,6 +137,8 @@ nlohmann::json to_json(const InsuranceDetail& detail) {
           {"payment_years", optional_int(detail.payment_years)}};
 }
 
+// 资产聚合包：先展开资产基础信息，再挂四个明细块；
+// 资产类型用不到的明细块输出 null，前端据此展示对应编辑区。
 nlohmann::json to_json(const AssetBundle& bundle) {
   auto json = to_json(bundle.asset);
   json["term_deposit"] = bundle.term_deposit.has_value()
@@ -134,6 +151,9 @@ nlohmann::json to_json(const AssetBundle& bundle) {
   return json;
 }
 
+// 交易流水：amount 为分；category 分类可选；transfer_group_id 关联同一笔转账的
+// 两条流水；balance_before/after 为交易前后资产余额（分，可为空）；
+// transaction_time 为 UTC "YYYY-MM-DD HH:MM:SS"；status 为枚举名。
 nlohmann::json to_json(const Transaction& transaction) {
   return {{"id", transaction.id},
           {"household_id", transaction.household_id},
@@ -152,22 +172,28 @@ nlohmann::json to_json(const Transaction& transaction) {
           {"updated_at", transaction.updated_at}};
 }
 
+// 转账结果：outgoing 转出流水、incoming 转入流水。
 nlohmann::json to_json(const TransferResult& result) {
   return {{"outgoing", to_json(result.outgoing)}, {"incoming", to_json(result.incoming)}};
 }
 
+// 按成员聚合：成员 id / 名称 / 金额（分）。
 nlohmann::json to_json(const NamedAmount& amount) {
   return {{"id", amount.id}, {"name", amount.name}, {"amount", amount.amount}};
 }
 
+// 按资产类型聚合：类型名 + 金额（分）。
 nlohmann::json to_json(const TypeAmount& amount) {
   return {{"asset_type", std::string(to_string(amount.type))}, {"amount", amount.amount}};
 }
 
+// 按收支分类聚合：分类名 + 金额（分）。
 nlohmann::json to_json(const CategoryAmount& amount) {
   return {{"category", amount.category}, {"amount", amount.amount}};
 }
 
+// 家庭总览：总资产 / 总负债 / 净资产 / 当月收入 / 支出 / 结余，
+// 以及按成员、按账户、按资产类型的聚合数组。
 nlohmann::json to_json(const HouseholdOverview& overview) {
   nlohmann::json by_member = nlohmann::json::array();
   for (const auto& item : overview.by_member) {
@@ -192,6 +218,8 @@ nlohmann::json to_json(const HouseholdOverview& overview) {
           {"by_type", by_type}};
 }
 
+// 区间统计：from/to 时间范围、收入 / 支出 / 结余，以及按成员、
+// 收入分类、支出分类的聚合数组。
 nlohmann::json to_json(const PeriodStatistics& statistics) {
   nlohmann::json by_member = nlohmann::json::array();
   for (const auto& item : statistics.by_member) {

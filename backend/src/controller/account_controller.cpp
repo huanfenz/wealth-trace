@@ -1,3 +1,4 @@
+// 账户控制器实现：解析请求 -> 调用 AccountService -> 序列化 JSON。
 #include "controller/account_controller.hpp"
 
 #include <optional>
@@ -15,6 +16,7 @@
 namespace wt {
 namespace {
 
+// 解析可选 type 字段：未提供用 fallback；提供但取值非法则报参数错误。
 AccountType resolve_account_type(const nlohmann::json& body, AccountType fallback) {
   const auto value = dto::optional_string(body, "type", 32);
   if (!value.has_value()) {
@@ -30,6 +32,8 @@ AccountType resolve_account_type(const nlohmann::json& body, AccountType fallbac
 }  // namespace
 
 void AccountController::register_routes(crow::SimpleApp& app) {
+  // GET /api/households/<int>/accounts：列出某家庭账户（带余额与资产数），
+  // 支持查询参数 owner_member_id 过滤。
   CROW_ROUTE(app, "/api/households/<int>/accounts").methods("GET"_method)(
       [this](const crow::request& request, int id) {
         return http::handle([this, &request, id] {
@@ -42,6 +46,8 @@ void AccountController::register_routes(crow::SimpleApp& app) {
         });
       });
 
+  // POST /api/households/<int>/accounts：新建账户；owner_member_id 与 name
+  // 必填，type 缺省 BANK，机构/掩码卡号/备注可选，enabled 缺省 true。
   CROW_ROUTE(app, "/api/households/<int>/accounts").methods("POST"_method)(
       [this](const crow::request& request, int id) {
         return http::handle([this, &request, id] {
@@ -58,10 +64,13 @@ void AccountController::register_routes(crow::SimpleApp& app) {
         });
       });
 
+  // GET /api/accounts/<int>：按 id 查询账户视图（含余额与资产数）。
   CROW_ROUTE(app, "/api/accounts/<int>").methods("GET"_method)([this](int id) {
     return http::handle([this, id] { return dto::to_json(service_.get_view(id)); });
   });
 
+  // PUT /api/accounts/<int>：更新账户；未提供的字段沿用原值，其中
+  // 机构/掩码卡号/备注显式提供 null 可清空。
   CROW_ROUTE(app, "/api/accounts/<int>").methods("PUT"_method)(
       [this](const crow::request& request, int id) {
         return http::handle([this, &request, id] {

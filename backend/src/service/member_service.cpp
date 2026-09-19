@@ -1,3 +1,4 @@
+// 成员服务实现：家庭成员的创建、列举、获取与更新（仅文本/枚举字段）。
 #include "service/member_service.hpp"
 
 #include <cstdint>
@@ -20,6 +21,7 @@ void MemberService::require_household(std::int64_t household_id) {
 HouseholdMember MemberService::create(std::int64_t household_id,
                                       const std::string& name, MemberRole role,
                                       MemberStatus status) {
+  // 成员必须挂在真实存在的家庭下，否则后续账户/资产会出现悬空属主。
   require_household(household_id);
   HouseholdMember member;
   member.household_id = household_id;
@@ -47,6 +49,8 @@ HouseholdMember MemberService::get(std::int64_t id) {
 
 HouseholdMember MemberService::update(std::int64_t id, const std::string& name,
                                       MemberRole role, MemberStatus status) {
+  // 取出原成员（不存在抛 not_found）后覆盖可变字段；不涉及 household_id，
+  // 成员不能在家庭之间迁移。
   HouseholdMember member = get(id);
   member.name = strings::require_text(name, "name", 100);
   member.role = role;

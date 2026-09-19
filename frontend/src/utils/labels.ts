@@ -1,3 +1,4 @@
+// 枚举值到中文文案的映射表，供下拉选项与表格展示复用。
 import type {
   AccountType,
   AssetStatus,
@@ -8,6 +9,7 @@ import type {
   TransactionType,
 } from '@/types'
 
+/** 账户类型中文名。 */
 export const accountTypeLabels: Record<AccountType, string> = {
   BANK: '银行',
   ALIPAY: '支付宝',
@@ -18,6 +20,7 @@ export const accountTypeLabels: Record<AccountType, string> = {
   OTHER: '其他',
 }
 
+/** 资产类型中文名。 */
 export const assetTypeLabels: Record<AssetType, string> = {
   CASH: '现金/活期',
   TERM_DEPOSIT: '定期存款',
@@ -28,27 +31,32 @@ export const assetTypeLabels: Record<AssetType, string> = {
   OTHER: '其他',
 }
 
+/** 资产状态中文名。 */
 export const assetStatusLabels: Record<AssetStatus, string> = {
   ACTIVE: '有效',
   CLOSED: '已关闭',
 }
 
+/** 成员角色中文名。 */
 export const memberRoleLabels: Record<MemberRole, string> = {
   OWNER: '户主',
   MEMBER: '成员',
 }
 
+/** 成员状态中文名。 */
 export const memberStatusLabels: Record<MemberStatus, string> = {
   ACTIVE: '正常',
   INACTIVE: '停用',
 }
 
+/** 期限单位中文名。 */
 export const termUnitLabels: Record<TermUnit, string> = {
   DAY: '天',
   MONTH: '月',
   YEAR: '年',
 }
 
+/** 交易类型中文名。 */
 export const transactionTypeLabels: Record<TransactionType, string> = {
   INCOME: '收入',
   EXPENSE: '支出',

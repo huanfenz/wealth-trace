@@ -1,3 +1,4 @@
+// 资产控制器实现：解析请求（含各类型明细块）-> 调用 AssetService -> 序列化 JSON。
 #include "controller/asset_controller.hpp"
 
 #include <optional>
@@ -16,6 +17,7 @@
 namespace wt {
 namespace {
 
+// 解析可选日期字段：未提供返回 nullopt，提供了则校验 ISO8601 日期格式。
 std::optional<std::string> parse_date_field(const nlohmann::json& object, const char* key,
                                             std::size_t max_length) {
   const auto value = dto::optional_string(object, key, max_length);
@@ -25,6 +27,8 @@ std::optional<std::string> parse_date_field(const nlohmann::json& object, const 
   return time_util::require_date(*value, key);
 }
 
+// 解析定期存款明细块：字段整体缺省或为 null 时返回 nullopt（表示不提供该明细）；
+// 存在则必须是对象，否则报参数错误。
 std::optional<TermDepositDetail> parse_term_deposit(const nlohmann::json& body) {
   if (!body.contains("term_deposit") || body.at("term_deposit").is_null()) {
     return std::nullopt;
@@ -53,6 +57,7 @@ std::optional<TermDepositDetail> parse_term_deposit(const nlohmann::json& body) 
   return detail;
 }
 
+// 解析基金明细块：缺省 / null 返回 nullopt；存在则必须是对象。
 std::optional<FundDetail> parse_fund(const nlohmann::json& body) {
   if (!body.contains("fund") || body.at("fund").is_null()) {
     return std::nullopt;
@@ -70,6 +75,7 @@ std::optional<FundDetail> parse_fund(const nlohmann::json& body) {
   return detail;
 }
 
+// 解析债券明细块：缺省 / null 返回 nullopt；存在则必须是对象。
 std::optional<BondDetail> parse_bond(const nlohmann::json& body) {
   if (!body.contains("bond") || body.at("bond").is_null()) {
     return std::nullopt;
@@ -90,6 +96,7 @@ std::optional<BondDetail> parse_bond(const nlohmann::json& body) {
   return detail;
 }
 
+// 解析保险明细块：缺省 / null 返回 nullopt；存在则必须是对象。
 std::optional<InsuranceDetail> parse_insurance(const nlohmann::json& body) {
   if (!body.contains("insurance") || body.at("insurance").is_null()) {
     return std::nullopt;
@@ -113,6 +120,7 @@ std::optional<InsuranceDetail> parse_insurance(const nlohmann::json& body) {
   return detail;
 }
 
+// 解析必填 asset_type：字段必填且取值必须是合法资产类型枚举。
 AssetType require_asset_type(const nlohmann::json& body) {
   const auto value = dto::require_string(body, "asset_type", 32);
   const auto parsed = parse_asset_type(value);
@@ -125,6 +133,8 @@ AssetType require_asset_type(const nlohmann::json& body) {
 }  // namespace
 
 void AssetController::register_routes(crow::SimpleApp& app) {
+  // GET /api/households/<int>/assets：列出资产聚合包，支持查询参数
+  // owner_member_id 与 account_id 过滤。
   CROW_ROUTE(app, "/api/households/<int>/assets").methods("GET"_method)(
       [this](const crow::request& request, int id) {
         return http::handle([this, &request, id] {
@@ -138,6 +148,8 @@ void AssetController::register_routes(crow::SimpleApp& app) {
         });
       });
 
+  // POST /api/households/<int>/assets：新建资产；account_id/name/asset_type
+  // 必填，opening_balance、remark 可选，四个明细块按资产类型选填。
   CROW_ROUTE(app, "/api/households/<int>/assets").methods("POST"_method)(
       [this](const crow::request& request, int /*id*/) {
         return http::handle([this, &request] {
@@ -156,10 +168,12 @@ void AssetController::register_routes(crow::SimpleApp& app) {
         });
       });
 
+  // GET /api/assets/<int>：按 id 查询资产聚合包。
   CROW_ROUTE(app, "/api/assets/<int>").methods("GET"_method)([this](int id) {
     return http::handle([this, id] { return dto::to_json(service_.get_bundle(id)); });
   });
 
+  // PUT /api/assets/<int>：更新资产元数据（名称、期初余额、备注）。
   CROW_ROUTE(app, "/api/assets/<int>").methods("PUT"_method)(
       [this](const crow::request& request, int id) {
         return http::handle([this, &request, id] {
@@ -174,6 +188,7 @@ void AssetController::register_routes(crow::SimpleApp& app) {
         });
       });
 
+  // PUT /api/assets/<int>/status：更新资产状态（ACTIVE / CLOSED）。
   CROW_ROUTE(app, "/api/assets/<int>/status").methods("PUT"_method)(
       [this](const crow::request& request, int id) {
         return http::handle([this, &request, id] {
@@ -187,6 +202,8 @@ void AssetController::register_routes(crow::SimpleApp& app) {
         });
       });
 
+  // PUT /api/assets/<int>/detail：按 detail_type 更新对应类型明细块；
+  // 请求体中对应明细块缺省时以 nullptr 传入，语义由 Service 决定。
   CROW_ROUTE(app, "/api/assets/<int>/detail").methods("PUT"_method)(
       [this](const crow::request& request, int id) {
         return http::handle([this, &request, id] {

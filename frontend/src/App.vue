@@ -1,3 +1,4 @@
+<!-- 应用根组件：左侧导航菜单 + 顶部标题/家庭名，主体区域渲染路由页面。 -->
 <template>
   <el-container class="app-shell">
     <el-aside width="216px" class="aside">
@@ -58,10 +59,11 @@ import { useAppStore } from '@/stores/app'
 const store = useAppStore()
 const route = useRoute()
 
-const activeMenu = computed(() => route.path)
+const activeMenu = computed(() => route.path) // 当前高亮菜单由路由路径决定
 const pageTitle = computed(() => (route.meta.title as string) ?? '财迹')
 const householdName = computed(() => store.household?.name ?? '')
 
+// 首次挂载时初始化全局数据（元数据、家庭、成员等），失败给出提示。
 onMounted(async () => {
   try {
     await store.initialize()

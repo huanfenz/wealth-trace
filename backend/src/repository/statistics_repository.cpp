@@ -1,3 +1,4 @@
+// statistics_repository.cpp：资产与收支的聚合统计 SQL；只做查询，不写业务规则。
 #include "repository/statistics_repository.hpp"
 
 #include <cstdint>
@@ -11,6 +12,7 @@
 
 namespace wt {
 
+// 总资产口径：排除 type='LIABILITY' 的 ACTIVE 资产，对 current_balance（分）求和。
 std::int64_t StatisticsRepository::total_assets(std::int64_t household_id) {
   Statement statement(
       database_,
@@ -23,6 +25,8 @@ std::int64_t StatisticsRepository::total_assets(std::int64_t household_id) {
   return 0;
 }
 
+// 总负债口径：type='LIABILITY' 的 ACTIVE 资产，current_balance 为负数，
+// 故对外用 ABS(SUM(...)) 返回正数金额。
 std::int64_t StatisticsRepository::total_liabilities(std::int64_t household_id) {
   Statement statement(
       database_,
@@ -35,6 +39,7 @@ std::int64_t StatisticsRepository::total_liabilities(std::int64_t household_id) 
   return 0;
 }
 
+// 净资产口径：全部 ACTIVE 资产 current_balance 直接求和（负债已是负数，无需再减）。
 std::int64_t StatisticsRepository::total_balance(std::int64_t household_id) {
   Statement statement(
       database_,
@@ -47,6 +52,7 @@ std::int64_t StatisticsRepository::total_balance(std::int64_t household_id) {
   return 0;
 }
 
+// 成员资产口径：该成员名下 ACTIVE 资产 current_balance 求和（含负债负数）。
 std::int64_t StatisticsRepository::member_balance(std::int64_t household_id,
                                                   std::int64_t member_id) {
   Statement statement(
@@ -60,6 +66,7 @@ std::int64_t StatisticsRepository::member_balance(std::int64_t household_id,
   return 0;
 }
 
+// 按成员分组：仅 ACTIVE 资产；JOIN 成员表取姓名；ORDER BY 3 即按汇总金额降序。
 std::vector<NamedAmount> StatisticsRepository::assets_by_member(
     std::int64_t household_id) {
   Statement statement(
@@ -77,6 +84,7 @@ std::vector<NamedAmount> StatisticsRepository::assets_by_member(
   return result;
 }
 
+// 按账户分组：仅 ACTIVE 资产；JOIN 账户表取名称；按汇总金额降序。
 std::vector<NamedAmount> StatisticsRepository::assets_by_account(
     std::int64_t household_id) {
   Statement statement(
@@ -94,6 +102,7 @@ std::vector<NamedAmount> StatisticsRepository::assets_by_account(
   return result;
 }
 
+// 按资产类型分组：仅 ACTIVE 资产，含 LIABILITY 类型；按汇总金额降序。
 std::vector<TypeAmount> StatisticsRepository::assets_by_type(std::int64_t household_id) {
   Statement statement(
       database_,
@@ -109,6 +118,9 @@ std::vector<TypeAmount> StatisticsRepository::assets_by_type(std::int64_t househ
   return result;
 }
 
+// 收支汇总口径：status='NORMAL'，type 仅取 INCOME/EXPENSE，时间闭区间；
+// member_id 可选，有值时在时间参数之后追加绑定第 4 个参数。
+// 结果按 type 分组，逐行回填到 summary（收入/支出各一行）。
 IncomeExpenseSummary StatisticsRepository::income_expense(
     std::int64_t household_id, std::optional<std::int64_t> member_id,
     const std::string& from_time, const std::string& to_time) {
@@ -139,6 +151,8 @@ IncomeExpenseSummary StatisticsRepository::income_expense(
   return summary;
 }
 
+// 成员净收支口径：status='NORMAL'，INCOME 记 +amount、EXPENSE 记 -amount，
+// 其他类型记 0；LEFT JOIN 使无交易的成员也保留并返回 0。
 std::vector<NamedAmount> StatisticsRepository::income_expense_by_member(
     std::int64_t household_id, const std::string& from_time, const std::string& to_time) {
   Statement statement(
@@ -159,6 +173,8 @@ std::vector<NamedAmount> StatisticsRepository::income_expense_by_member(
   return result;
 }
 
+// 支出分类口径：status='NORMAL' 且 type='EXPENSE'，按 category 分组，
+// category 为空时归并为 '未分类'，按金额降序。
 std::vector<CategoryAmount> StatisticsRepository::expense_by_category(
     std::int64_t household_id, const std::string& from_time, const std::string& to_time) {
   Statement statement(
@@ -175,6 +191,8 @@ std::vector<CategoryAmount> StatisticsRepository::expense_by_category(
   return result;
 }
 
+// 收入分类口径：status='NORMAL' 且 type='INCOME'，按 category 分组，
+// category 为空时归并为 '未分类'，按金额降序。
 std::vector<CategoryAmount> StatisticsRepository::income_by_category(
     std::int64_t household_id, const std::string& from_time, const std::string& to_time) {
   Statement statement(

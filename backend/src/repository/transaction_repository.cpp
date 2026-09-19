@@ -1,3 +1,5 @@
+// transaction_repository.cpp："transaction" 表的 SQL 实现与行映射；
+// 动态过滤条件由 build_where 生成、apply_bindings 统一绑定。
 #include "repository/transaction_repository.hpp"
 
 #include <cstdint>
@@ -11,6 +13,11 @@
 namespace wt {
 namespace {
 
+// 行映射：列下标必须与 kSelectColumns 的顺序严格一致。
+// 0=id 1=household_id 2=owner_member_id 3=asset_id 4=type 5=category 6=amount
+// 7=transfer_group_id 8=balance_before 9=balance_after 10=transaction_time
+// 11=remark 12=status 13=created_at 14=updated_at
+// 金额单位：分。枚举解析失败回退 Adjustment / Normal。
 Transaction map_transaction(Statement& statement) {
   Transaction transaction;
   transaction.id = statement.get_int64(0);
@@ -33,6 +40,7 @@ Transaction map_transaction(Statement& statement) {
   return transaction;
 }
 
+// SELECT 列顺序，与 map_transaction 的下标一一对应。
 constexpr const char* kSelectColumns =
     "id, household_id, owner_member_id, asset_id, type, category, amount, "
     "transfer_group_id, balance_before, balance_after, transaction_time, remark, status, "
@@ -40,6 +48,10 @@ constexpr const char* kSelectColumns =
 
 // Builds the WHERE clause shared by list() and count(). Bind parameters are
 // appended to `bindings` in sqlite order.
+// 动态 WHERE：household_id 必选；其余可选字段按固定顺序（成员、资产、类型、
+// 起始时间、结束时间）逐个判断，有值才拼接 " AND 列 = ?"，并记录占位符序号 index。
+// 文本参数与整数参数分开收集，序号与 SQL 中 ? 的位置一一对应。
+// list()/count() 共用此函数，保证两处过滤口径完全一致。
 std::string build_where(const TransactionQuery& query,
                         std::vector<std::pair<int, std::string>>& text_bindings,
                         std::vector<std::pair<int, std::int64_t>>& int_bindings) {
@@ -69,6 +81,7 @@ std::string build_where(const TransactionQuery& query,
   return sql;
 }
 
+// 按 build_where 记录的序号绑定参数；文本与整数分两轮绑定，顺序不影响结果。
 void apply_bindings(Statement& statement,
                     const std::vector<std::pair<int, std::string>>& text_bindings,
                     const std::vector<std::pair<int, std::int64_t>>& int_bindings) {
@@ -82,6 +95,7 @@ void apply_bindings(Statement& statement,
 
 }  // namespace
 
+// 插入流水；表名为 SQL 保留字故写作 "transaction"。枚举以文本持久化。
 std::int64_t TransactionRepository::create(const Transaction& transaction) {
   Statement statement(
       database_,
@@ -116,6 +130,7 @@ std::optional<Transaction> TransactionRepository::find_by_id(std::int64_t id) {
   return map_transaction(statement);
 }
 
+// 列表：拼出 SELECT + build_where + 排序分页，先绑定 WHERE 参数再绑定 LIMIT/OFFSET。
 std::vector<Transaction> TransactionRepository::list(const TransactionQuery& query) {
   std::vector<std::pair<int, std::string>> text_bindings;
   std::vector<std::pair<int, std::int64_t>> int_bindings;
@@ -123,6 +138,7 @@ std::vector<Transaction> TransactionRepository::list(const TransactionQuery& que
                     build_where(query, text_bindings, int_bindings) +
                     " ORDER BY transaction_time DESC, id DESC LIMIT ? OFFSET ?;";
 
+  // WHERE 里的占位符已占用 1..N，LIMIT/OFFSET 顺延为 N+1、N+2。
   const int limit_index = 1 + static_cast<int>(text_bindings.size() + int_bindings.size());
   Statement statement(database_, sql);
   apply_bindings(statement, text_bindings, int_bindings);
@@ -136,6 +152,7 @@ std::vector<Transaction> TransactionRepository::list(const TransactionQuery& que
   return transactions;
 }
 
+// 计数：与 list 复用同一 build_where，确保总数与分页查询口径一致。
 std::int64_t TransactionRepository::count(const TransactionQuery& query) {
   std::vector<std::pair<int, std::string>> text_bindings;
   std::vector<std::pair<int, std::int64_t>> int_bindings;
@@ -150,6 +167,7 @@ std::int64_t TransactionRepository::count(const TransactionQuery& query) {
   return 0;
 }
 
+// 统计某资产的历史流水条数。
 std::int64_t TransactionRepository::count_by_asset(std::int64_t asset_id) {
   Statement statement(database_,
                       "SELECT COUNT(*) FROM \"transaction\" WHERE asset_id = ?;");
@@ -160,6 +178,7 @@ std::int64_t TransactionRepository::count_by_asset(std::int64_t asset_id) {
   return 0;
 }
 
+// 转账分组 id 生成：取现有最大值 + 1；表为空时 COALESCE 使结果为 1。
 std::int64_t TransactionRepository::next_transfer_group_id() {
   Statement statement(database_,
                       "SELECT COALESCE(MAX(transfer_group_id), 0) + 1 FROM \"transaction\";");

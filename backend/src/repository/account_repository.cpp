@@ -1,3 +1,4 @@
+// account_repository.cpp：account 表的 CRUD SQL 实现与行映射。
 #include "repository/account_repository.hpp"
 
 #include <cstdint>
@@ -11,6 +12,10 @@
 namespace wt {
 namespace {
 
+// 行映射：列下标必须与 kSelectColumns 的顺序严格一致。
+// 0=id 1=household_id 2=owner_member_id 3=name 4=type
+// 5=institution_name 6=account_no_masked 7=remark 8=enabled 9=created_at 10=updated_at
+// 可空列用 get_optional_text；type 解析失败回退 AccountType::Other。
 Account map_account(Statement& statement) {
   Account account;
   account.id = statement.get_int64(0);
@@ -27,12 +32,14 @@ Account map_account(Statement& statement) {
   return account;
 }
 
+// SELECT 列顺序，与 map_account 的下标一一对应。
 constexpr const char* kSelectColumns =
     "id, household_id, owner_member_id, name, type, institution_name, "
     "account_no_masked, remark, enabled, created_at, updated_at";
 
 }  // namespace
 
+// 插入账户（enum 文本持久化，可空列走 bind_optional_text），返回自增主键。
 std::int64_t AccountRepository::create(const Account& account) {
   Statement statement(
       database_,
@@ -63,6 +70,8 @@ std::optional<Account> AccountRepository::find_by_id(std::int64_t id) {
   return map_account(statement);
 }
 
+// 动态查询：household_id 为必选条件；仅当 owner_member_id 有值时
+// 才追加 " AND owner_member_id = ?" 并按顺序绑定第 2 个参数。
 std::vector<Account> AccountRepository::list_by_household(
     std::int64_t household_id, std::optional<std::int64_t> owner_member_id) {
   std::string sql = std::string("SELECT ") + kSelectColumns +

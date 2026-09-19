@@ -1,3 +1,4 @@
+// 交易控制器实现：解析请求 -> 调用 TransactionService -> 序列化 JSON。
 #include "controller/transaction_controller.hpp"
 
 #include <optional>
@@ -15,14 +16,17 @@
 namespace wt {
 namespace {
 
+// 读取可选交易时间（UTC "YYYY-MM-DD HH:MM:SS"，长度 19）。
 std::optional<std::string> body_time(const nlohmann::json& body) {
   return dto::optional_string(body, "transaction_time", 19);
 }
 
+// 读取可选备注。
 std::optional<std::string> body_remark(const nlohmann::json& body) {
   return dto::optional_string(body, "remark", 500);
 }
 
+// 读取可选收支分类。
 std::optional<std::string> body_category(const nlohmann::json& body) {
   return dto::optional_string(body, "category", 64);
 }
@@ -30,6 +34,9 @@ std::optional<std::string> body_category(const nlohmann::json& body) {
 }  // namespace
 
 void TransactionController::register_routes(crow::SimpleApp& app) {
+  // GET /api/households/<int>/transactions：分页查询流水，支持查询参数
+  // owner_member_id、asset_id、type、from、to、limit（默认 200，1~1000）、offset，
+  // 返回 {"total","items"}。
   CROW_ROUTE(app, "/api/households/<int>/transactions").methods("GET"_method)(
       [this](const crow::request& request, int id) {
         return http::handle([this, &request, id] {
@@ -60,6 +67,8 @@ void TransactionController::register_routes(crow::SimpleApp& app) {
         });
       });
 
+  // POST /api/households/<int>/transactions/income：记一笔收入；
+  // asset_id、amount（分）必填，category/transaction_time/remark 可选。
   CROW_ROUTE(app, "/api/households/<int>/transactions/income").methods("POST"_method)(
       [this](const crow::request& request, int /*id*/) {
         return http::handle([this, &request] {
@@ -72,6 +81,8 @@ void TransactionController::register_routes(crow::SimpleApp& app) {
         });
       });
 
+  // POST /api/households/<int>/transactions/expense：记一笔支出；
+  // asset_id、amount（分）必填，category/transaction_time/remark 可选。
   CROW_ROUTE(app, "/api/households/<int>/transactions/expense").methods("POST"_method)(
       [this](const crow::request& request, int /*id*/) {
         return http::handle([this, &request] {
@@ -84,6 +95,8 @@ void TransactionController::register_routes(crow::SimpleApp& app) {
         });
       });
 
+  // POST /api/households/<int>/transactions/adjustment：对资产做余额调整；
+  // asset_id、amount（分）必填。
   CROW_ROUTE(app, "/api/households/<int>/transactions/adjustment")
       .methods("POST"_method)([this](const crow::request& request, int /*id*/) {
         return http::handle([this, &request] {
@@ -95,6 +108,8 @@ void TransactionController::register_routes(crow::SimpleApp& app) {
         });
       });
 
+  // POST /api/households/<int>/transfers：资产间转账，生成一对转出/转入流水；
+  // from_asset_id、to_asset_id、amount（分）必填。
   CROW_ROUTE(app, "/api/households/<int>/transfers").methods("POST"_method)(
       [this](const crow::request& request, int /*id*/) {
         return http::handle([this, &request] {
@@ -108,6 +123,7 @@ void TransactionController::register_routes(crow::SimpleApp& app) {
         });
       });
 
+  // GET /api/transactions/<int>：按 id 查询单条流水。
   CROW_ROUTE(app, "/api/transactions/<int>").methods("GET"_method)([this](int id) {
     return http::handle([this, id] { return dto::to_json(service_.get(id)); });
   });

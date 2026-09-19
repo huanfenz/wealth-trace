@@ -1,3 +1,4 @@
+<!-- 收支与转账页：分页展示交易流水，并支持记收入/支出、资产间转账与余额调整。 -->
 <template>
   <div>
     <div class="toolbar">
@@ -112,6 +113,7 @@
 </template>
 
 <script setup lang="ts">
+// 职责：展示/新增交易流水；同一弹窗按 kind 复用为收入、支出、转账、调整四种表单并分派到对应接口。
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Edit, Minus, Plus, Sort } from '@element-plus/icons-vue'
@@ -129,23 +131,24 @@ import { transactionTypeLabels } from '@/utils/labels'
 import { formatMoney, toMinor } from '@/utils/money'
 import type { Transaction, TransactionType } from '@/types'
 
-type DialogKind = 'income' | 'expense' | 'transfer' | 'adjustment'
+type DialogKind = 'income' | 'expense' | 'transfer' | 'adjustment' // 弹窗形态
 
 const store = useAppStore()
-const transactions = ref<Transaction[]>([])
-const loading = ref(false)
-const saving = ref(false)
-const total = ref(0)
-const page = ref(1)
-const pageSize = 20
+const transactions = ref<Transaction[]>([]) // 当前页流水
+const loading = ref(false)                  // 列表加载中
+const saving = ref(false)                   // 表单提交中
+const total = ref(0)                        // 总条数
+const page = ref(1)                         // 当前页码
+const pageSize = 20                         // 每页条数
 
-const filterMember = ref<number | undefined>(undefined)
-const filterAsset = ref<number | undefined>(undefined)
-const filterType = ref<string | undefined>(undefined)
+const filterMember = ref<number | undefined>(undefined) // 按成员筛选
+const filterAsset = ref<number | undefined>(undefined)  // 按资产筛选
+const filterType = ref<string | undefined>(undefined)   // 按交易类型筛选
 
-const dialogVisible = ref(false)
-const kind = ref<DialogKind>('income')
+const dialogVisible = ref(false)      // 弹窗显隐
+const kind = ref<DialogKind>('income') // 当前弹窗形态
 
+// 各形态对应的弹窗标题。
 const dialogTitles: Record<DialogKind, string> = {
   income: '记录收入',
   expense: '记录支出',
@@ -153,6 +156,7 @@ const dialogTitles: Record<DialogKind, string> = {
   adjustment: '余额调整',
 }
 
+// 弹窗表单：金额以「元」字符串编辑，提交时用 toMinor 转为「分」。
 const form = reactive({
   asset_id: 0,
   from_asset_id: 0,
@@ -163,10 +167,12 @@ const form = reactive({
   remark: '',
 })
 
+// 分类下拉选项随弹窗形态切换：收入用收入分类，否则用支出分类。
 const categories = computed(() =>
   kind.value === 'income' ? store.incomeCategories : store.expenseCategories,
 )
 
+// 组装资产下拉的完整标签：成员 · 账户 · 资产名。
 function assetLabel(id: number): string {
   const asset = store.assets.find((item) => item.id === id)
   if (!asset) {
@@ -175,6 +181,7 @@ function assetLabel(id: number): string {
   return `${store.memberName(asset.owner_member_id)} · ${store.accountName(asset.account_id)} · ${asset.name}`
 }
 
+// 将金额按交易方向转为带符号数值：支出/转出取负，收入/转入/调整保持原值。
 function signedAmount(transaction: Transaction): number {
   switch (transaction.type) {
     case 'EXPENSE':
@@ -187,6 +194,7 @@ function signedAmount(transaction: Transaction): number {
   }
 }
 
+// 交易类型对应的标签配色。
 function tagType(type: TransactionType): 'success' | 'warning' | 'primary' | 'info' {
   switch (type) {
     case 'INCOME':
@@ -200,6 +208,7 @@ function tagType(type: TransactionType): 'success' | 'warning' | 'primary' | 'in
   }
 }
 
+// 按筛选条件与分页参数查询流水，offset 由当前页码换算。
 async function load() {
   if (!store.householdId) {
     return
@@ -222,16 +231,19 @@ async function load() {
   }
 }
 
+// 筛选条件变化时回到第一页再查询。
 function reload() {
   page.value = 1
   void load()
 }
 
+// 翻页查询。
 function onPage(next: number) {
   page.value = next
   void load()
 }
 
+// 打开指定形态的弹窗并重置表单默认值。
 function openDialog(next: DialogKind) {
   kind.value = next
   form.asset_id = store.assets[0]?.id ?? 0
@@ -244,8 +256,9 @@ function openDialog(next: DialogKind) {
   dialogVisible.value = true
 }
 
+// 校验金额（非调整须为正、调整不得为 0），按形态调用对应接口，成功后刷新列表与资产缓存。
 async function submit() {
-  const amount = toMinor(form.amount_yuan)
+  const amount = toMinor(form.amount_yuan) // 元 -> 分
   if (kind.value !== 'adjustment' && amount <= 0) {
     ElMessage.warning('请输入正确的金额')
     return

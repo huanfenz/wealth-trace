@@ -1,3 +1,4 @@
+// 账户服务实现：账户增删改查、清洗可选字段，并汇总账户下资产余额视图。
 #include "service/account_service.hpp"
 
 #include <cstdint>
@@ -13,6 +14,8 @@
 namespace wt {
 namespace {
 
+// 清洗可空文本字段：未提供或去空白后为空都归一化为 nullopt，
+// 避免把「空串」与「无值」两种表示混入库中；长度超限由 optional_text 抛错。
 std::optional<std::string> clean_optional(const std::optional<std::string>& value,
                                           std::string_view field,
                                           std::size_t max_length) {
@@ -40,6 +43,7 @@ void AccountService::require_member(std::int64_t household_id,
   if (!member.has_value()) {
     throw not_found("member not found");
   }
+  // 属主必须属于本家庭，否则会把账户挂到别家成员名下。
   if (member->household_id != household_id) {
     throw invalid_request("member does not belong to the household");
   }
@@ -77,6 +81,8 @@ std::vector<Account> AccountService::list(std::int64_t household_id,
 
 std::vector<AccountView> AccountService::list_views(
     std::int64_t household_id, std::optional<std::int64_t> owner_member_id) {
+  // 先复用 list 拿到账户集合，再逐个查其资产余额与数量；
+  // 负债资产余额为负，聚合后自然从账户总额中抵减。
   const auto accounts = list(household_id, owner_member_id);
   std::vector<AccountView> views;
   views.reserve(accounts.size());
@@ -91,6 +97,7 @@ std::vector<AccountView> AccountService::list_views(
 }
 
 AccountView AccountService::get_view(std::int64_t id) {
+  // get(id) 负责不存在时抛 not_found，这里只补充聚合字段。
   AccountView view;
   view.account = get(id);
   view.balance = assets_.sum_balance_by_account(id);
@@ -113,8 +120,9 @@ Account AccountService::update(std::int64_t id, std::int64_t owner_member_id,
                                const std::optional<std::string>& remark, bool enabled) {
   Account account = get(id);
   if (owner_member_id != account.owner_member_id) {
-    // Changing the owner would desynchronise the redundant owner_member_id that
-    // assets and transactions keep. V1 blocks it once assets exist.
+    // 资产与交易冗余保存了由账户派生的 owner_member_id。若账户下已有资产，
+    // 改属主会导致冗余值与账户不一致，故直接拒绝；没有资产时才允许改，
+    // 并校验新属主属于本家庭。
     if (assets_.count_by_account(id) > 0) {
       throw conflict("cannot change account owner while it still has assets");
     }

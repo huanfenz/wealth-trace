@@ -1,3 +1,4 @@
+// member_repository.cpp：household_member 表的 CRUD SQL 实现与行映射。
 #include "repository/member_repository.hpp"
 
 #include <cstdint>
@@ -11,6 +12,9 @@
 namespace wt {
 namespace {
 
+// 行映射：列下标必须与 kSelectColumns 的顺序严格一致。
+// 0=id 1=household_id 2=name 3=role 4=status 5=created_at 6=updated_at
+// 枚举解析失败时回退到 MemberRole::Member 与 MemberStatus::Active。
 HouseholdMember map_member(Statement& statement) {
   HouseholdMember member;
   member.id = statement.get_int64(0);
@@ -24,11 +28,13 @@ HouseholdMember map_member(Statement& statement) {
   return member;
 }
 
+// SELECT 列顺序，与 map_member 的下标一一对应。
 constexpr const char* kSelectColumns =
     "id, household_id, name, role, status, created_at, updated_at";
 
 }  // namespace
 
+// 插入成员（enum 以字符串文本持久化），返回自增主键。
 std::int64_t MemberRepository::create(const HouseholdMember& member) {
   Statement statement(
       database_,

@@ -1,3 +1,4 @@
+// 日志模块实现：UTC 时间戳、线程安全输出与按级别过滤。
 #include "common/logging.hpp"
 
 #include <atomic>
@@ -11,9 +12,12 @@
 namespace wt {
 namespace {
 
+// 全局最低输出级别；用原子量保证多线程读写无数据竞争，默认 Info。
 std::atomic<int> g_log_level{static_cast<int>(LogLevel::Info)};
+// 串行化输出，避免多线程日志互相穿插。
 std::mutex g_log_mutex;
 
+// 级别到输出标签（大写）的映射。
 const char* level_tag(LogLevel level) {
   switch (level) {
     case LogLevel::Trace: return "TRACE";
@@ -26,10 +30,12 @@ const char* level_tag(LogLevel level) {
   return "INFO";
 }
 
+// 生成 UTC 时间戳，格式为 "YYYY-MM-DD HH:MM:SS.mmm"（毫秒补零到 3 位）。
 std::string utc_timestamp() {
   using namespace std::chrono;
   const auto now = system_clock::now();
   const auto seconds = system_clock::to_time_t(now);
+  // 取毫秒部分：注意先对 1000 取模，避免用秒级精度丢失毫秒。
   const auto millis = duration_cast<milliseconds>(now.time_since_epoch()) % 1000;
   std::tm tm{};
 #if defined(_WIN32)
@@ -49,6 +55,7 @@ std::string utc_timestamp() {
 
 }  // namespace
 
+// 解析级别文本，大小写敏感；未知值回退为 Info，保证配置容错。
 LogLevel parse_log_level(std::string_view text) {
   if (text == "trace") return LogLevel::Trace;
   if (text == "debug") return LogLevel::Debug;
@@ -59,6 +66,7 @@ LogLevel parse_log_level(std::string_view text) {
   return LogLevel::Info;
 }
 
+// 级别转小写文本，供配置回显使用。
 std::string_view to_string(LogLevel level) {
   switch (level) {
     case LogLevel::Trace: return "trace";
@@ -72,6 +80,7 @@ std::string_view to_string(LogLevel level) {
 }
 
 void set_log_level(LogLevel level) {
+  // relaxed 足够：日志级别只需最终可见，不依赖与其他内存操作的顺序。
   g_log_level.store(static_cast<int>(level), std::memory_order_relaxed);
 }
 
@@ -80,6 +89,7 @@ LogLevel log_level() {
 }
 
 void log_message(LogLevel level, std::string_view message) {
+  // 低于全局级别的日志直接丢弃，避免不必要的加锁与格式化开销。
   if (static_cast<int>(level) < g_log_level.load(std::memory_order_relaxed)) {
     return;
   }

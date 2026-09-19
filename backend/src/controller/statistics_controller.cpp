@@ -1,3 +1,4 @@
+// 统计控制器实现：解析请求 -> 调用 StatisticsService -> 序列化 JSON。
 #include "controller/statistics_controller.hpp"
 
 #include <string>
@@ -13,11 +14,13 @@
 namespace wt {
 namespace {
 
+// 从今天的 ISO8601 日期串取当前年份，作为 overview 的默认年。
 int current_year() {
   const std::string today = time_util::today_iso8601();
   return std::stoi(today.substr(0, 4));
 }
 
+// 从今天的 ISO8601 日期串取当前月份，作为 overview 的默认月。
 int current_month() {
   const std::string today = time_util::today_iso8601();
   return std::stoi(today.substr(5, 2));
@@ -26,6 +29,8 @@ int current_month() {
 }  // namespace
 
 void StatisticsController::register_routes(crow::SimpleApp& app) {
+  // GET /api/households/<int>/statistics/overview：家庭总览，查询参数
+  // year / month 缺省为当前年月。
   CROW_ROUTE(app, "/api/households/<int>/statistics/overview").methods("GET"_method)(
       [this](const crow::request& request, int id) {
         return http::handle([this, &request, id] {
@@ -35,6 +40,8 @@ void StatisticsController::register_routes(crow::SimpleApp& app) {
         });
       });
 
+  // GET /api/households/<int>/statistics/period：区间统计；from/to 必填，
+  // owner_member_id 可选用于按成员过滤。
   CROW_ROUTE(app, "/api/households/<int>/statistics/period").methods("GET"_method)(
       [this](const crow::request& request, int id) {
         return http::handle([this, &request, id] {

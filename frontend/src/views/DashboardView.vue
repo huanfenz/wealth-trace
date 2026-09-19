@@ -1,3 +1,4 @@
+<!-- 家庭总览页：展示净资产/资产负债/本月收支等指标，以及按成员、类型、账户的汇总表。 -->
 <template>
   <div>
     <el-row :gutter="16">
@@ -82,6 +83,7 @@
 </template>
 
 <script setup lang="ts">
+// 职责：进入页面时按当前家庭拉取总览统计并渲染；无交互表单，仅读取展示。
 import { onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 
@@ -94,6 +96,7 @@ import type { AssetType, HouseholdOverview } from '@/types'
 const store = useAppStore()
 const overview = ref<HouseholdOverview | null>(null)
 
+// 拉取家庭总览数据；不传 year/month 时后端默认取当前月。
 async function load() {
   if (!store.householdId) {
     return

@@ -1,3 +1,4 @@
+// 成员控制器实现：解析请求 -> 调用 MemberService -> 序列化 JSON。
 #include "controller/member_controller.hpp"
 
 #include <string>
@@ -14,6 +15,7 @@
 namespace wt {
 namespace {
 
+// 解析可选 role 字段：未提供用 fallback；提供但取值非法则报参数错误。
 MemberRole resolve_role(const nlohmann::json& body, MemberRole fallback) {
   const auto value = dto::optional_string(body, "role", 32);
   if (!value.has_value()) {
@@ -26,6 +28,7 @@ MemberRole resolve_role(const nlohmann::json& body, MemberRole fallback) {
   return *parsed;
 }
 
+// 解析可选 status 字段：未提供用 fallback；提供但取值非法则报参数错误。
 MemberStatus resolve_status(const nlohmann::json& body, MemberStatus fallback) {
   const auto value = dto::optional_string(body, "status", 32);
   if (!value.has_value()) {
@@ -41,6 +44,7 @@ MemberStatus resolve_status(const nlohmann::json& body, MemberStatus fallback) {
 }  // namespace
 
 void MemberController::register_routes(crow::SimpleApp& app) {
+  // GET /api/households/<int>/members：列出某家庭的全部成员。
   CROW_ROUTE(app, "/api/households/<int>/members").methods("GET"_method)([this](int id) {
     return http::handle([this, id] {
       nlohmann::json data = nlohmann::json::array();
@@ -51,6 +55,7 @@ void MemberController::register_routes(crow::SimpleApp& app) {
     });
   });
 
+  // POST /api/households/<int>/members：新建成员；name 必填，role/status 可选。
   CROW_ROUTE(app, "/api/households/<int>/members").methods("POST"_method)(
       [this](const crow::request& request, int id) {
         return http::handle([this, &request, id] {
@@ -62,10 +67,12 @@ void MemberController::register_routes(crow::SimpleApp& app) {
         });
       });
 
+  // GET /api/members/<int>：按 id 查询成员。
   CROW_ROUTE(app, "/api/members/<int>").methods("GET"_method)([this](int id) {
     return http::handle([this, id] { return dto::to_json(service_.get(id)); });
   });
 
+  // PUT /api/members/<int>：更新成员；未提供的字段沿用原值。
   CROW_ROUTE(app, "/api/members/<int>").methods("PUT"_method)(
       [this](const crow::request& request, int id) {
         return http::handle([this, &request, id] {

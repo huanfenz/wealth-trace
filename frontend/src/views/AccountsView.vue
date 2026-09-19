@@ -1,3 +1,4 @@
+<!-- 账户管理页：按成员筛选账户列表，并通过弹窗新增/编辑账户（属主、类型、机构等）。 -->
 <template>
   <div>
     <div class="toolbar">
@@ -81,6 +82,7 @@
 </template>
 
 <script setup lang="ts">
+// 职责：展示/维护账户列表；支持按成员筛选，弹窗新增或编辑账户，保存后同步刷新 store 缓存。
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
@@ -92,13 +94,14 @@ import { accountTypeLabels } from '@/utils/labels'
 import type { Account, AccountType } from '@/types'
 
 const store = useAppStore()
-const accounts = ref<Account[]>([])
-const loading = ref(false)
-const saving = ref(false)
-const dialogVisible = ref(false)
-const editing = ref<Account | null>(null)
-const filterMember = ref<number | undefined>(undefined)
+const accounts = ref<Account[]>([])       // 当前筛选条件下的账户列表
+const loading = ref(false)                // 列表加载中
+const saving = ref(false)                 // 表单提交中
+const dialogVisible = ref(false)          // 弹窗显隐
+const editing = ref<Account | null>(null) // 当前编辑对象，null 表示新增
+const filterMember = ref<number | undefined>(undefined) // 按成员筛选
 
+// 弹窗表单数据（余额等统计字段不在此维护）。
 const form = reactive({
   owner_member_id: 0,
   name: '',
@@ -109,6 +112,7 @@ const form = reactive({
   enabled: true,
 })
 
+// 按筛选条件拉取账户列表，并同步 store 中的账户缓存（供其他页面下拉使用）。
 async function load() {
   if (!store.householdId) {
     return
@@ -124,6 +128,7 @@ async function load() {
   }
 }
 
+// 打开「新增」弹窗，默认属主为第一位成员。
 function openCreate() {
   editing.value = null
   form.owner_member_id = store.members[0]?.id ?? 0
@@ -136,6 +141,7 @@ function openCreate() {
   dialogVisible.value = true
 }
 
+// 打开「编辑」弹窗并回填选中账户数据（可空字段以空串兜底）。
 function openEdit(account: Account) {
   editing.value = account
   form.owner_member_id = account.owner_member_id
@@ -148,6 +154,7 @@ function openEdit(account: Account) {
   dialogVisible.value = true
 }
 
+// 校验属主与账户名后，按编辑/新增分支提交，成功后重新加载列表。
 async function save() {
   if (!form.owner_member_id) {
     ElMessage.warning('请选择属主')

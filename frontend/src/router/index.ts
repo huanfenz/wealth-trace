@@ -1,9 +1,10 @@
+// 路由配置：定义各页面路径与懒加载组件，meta.title 用于顶部标题栏展示。
 import { createRouter, createWebHistory } from 'vue-router'
 
 const router = createRouter({
   history: createWebHistory(),
   routes: [
-    { path: '/', redirect: '/dashboard' },
+    { path: '/', redirect: '/dashboard' }, // 根路径默认跳转总览
     {
       path: '/dashboard',
       name: 'dashboard',

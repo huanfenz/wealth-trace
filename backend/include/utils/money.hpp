@@ -1,3 +1,4 @@
+// 金额工具：内部统一以最小货币单位整数（人民币「分」）存储与传输。
 #pragma once
 
 #include <cstdint>
@@ -6,15 +7,15 @@
 
 namespace wt::money {
 
-// All monetary values are stored and transported as integer minor units.
-// For CNY: 1 yuan = 100 fen.
+// 所有金额都以整数最小货币单位存储和传输。
+// 人民币（CNY）：1 元 = 100 分。
 inline constexpr std::int64_t kMinorUnitsPerYuan = 100;
 
-// 12345 -> "123.45"
+// 分转元字符串：12345 -> "123.45"。
 std::string format(std::int64_t minor_units);
 
-// "123.45" -> 12345. Throws ApiError(invalid request) on malformed input.
-// Up to two decimal places are accepted.
+// 元字符串转分："123.45" -> 12345；格式非法时抛出 ApiError(invalid request)。
+// 最多接受两位小数。
 std::int64_t parse_yuan(std::string_view text);
 
 }  // namespace wt::money

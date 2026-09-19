@@ -1,3 +1,4 @@
+<!-- 收支统计页：选择月份（可再按成员筛选）后展示区间收支、分类汇总与成员结余。 -->
 <template>
   <div>
     <div class="toolbar">
@@ -74,6 +75,7 @@
 </template>
 
 <script setup lang="ts">
+// 职责：按所选月份计算起止时间后请求区间统计，并渲染收入/支出/结余与分类、成员汇总。
 import { computed, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 
@@ -84,13 +86,14 @@ import type { PeriodStatistics } from '@/types'
 
 const store = useAppStore()
 const now = new Date()
-const month = ref(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`)
-const memberId = ref<number | undefined>(undefined)
+const month = ref(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`) // 默认当前月 YYYY-MM
+const memberId = ref<number | undefined>(undefined) // 按成员筛选（空为全部）
 const stats = ref<PeriodStatistics | null>(null)
 
+// 把 "YYYY-MM" 换算成该月首日 00:00:00 与末日 23:59:59 的查询区间。
 const range = computed(() => {
   const [year, monthValue] = month.value.split('-').map(Number)
-  const lastDay = new Date(year, monthValue, 0).getDate()
+  const lastDay = new Date(year, monthValue, 0).getDate() // 下月第 0 天即本月最后一天
   const pad = (value: number) => String(value).padStart(2, '0')
   return {
     from: `${year}-${pad(monthValue)}-01 00:00:00`,
@@ -98,6 +101,7 @@ const range = computed(() => {
   }
 })
 
+// 按当前月份区间与成员筛选拉取统计数据。
 async function load() {
   if (!store.householdId) {
     return

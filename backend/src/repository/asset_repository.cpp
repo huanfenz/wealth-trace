@@ -1,3 +1,4 @@
+// asset_repository.cpp：asset 表及四张 1:0..1 明细表的 SQL 实现与行映射。
 #include "repository/asset_repository.hpp"
 
 #include <cstdint>
@@ -11,6 +12,10 @@
 namespace wt {
 namespace {
 
+// 行映射：列下标必须与 kSelectColumns 的顺序严格一致。
+// 0=id 1=household_id 2=owner_member_id 3=account_id 4=name 5=asset_type
+// 6=opening_balance 7=current_balance 8=status 9=remark 10=created_at 11=updated_at
+// 金额均为整数分；负债的 current_balance 为负数。枚举解析失败回退默认值。
 Asset map_asset(Statement& statement) {
   Asset asset;
   asset.id = statement.get_int64(0);
@@ -28,12 +33,14 @@ Asset map_asset(Statement& statement) {
   return asset;
 }
 
+// SELECT 列顺序，与 map_asset 的下标一一对应。
 constexpr const char* kSelectColumns =
     "id, household_id, owner_member_id, account_id, name, asset_type, "
     "opening_balance, current_balance, status, remark, created_at, updated_at";
 
 }  // namespace
 
+// 插入资产（冗余 household_id/owner_member_id 直接写入），返回自增主键。
 std::int64_t AssetRepository::create(const Asset& asset) {
   Statement statement(
       database_,
@@ -65,6 +72,8 @@ std::optional<Asset> AssetRepository::find_by_id(std::int64_t id) {
   return map_asset(statement);
 }
 
+// 动态查询：household_id 为必选；owner_member_id、account_id 有值时才依次追加
+// 对应的 AND 条件，并用自增 index 保证占位符顺序与绑定顺序一致。
 std::vector<Asset> AssetRepository::list_by_household(
     std::int64_t household_id, std::optional<std::int64_t> owner_member_id,
     std::optional<std::int64_t> account_id) {
@@ -95,6 +104,7 @@ std::vector<Asset> AssetRepository::list_by_household(
   return assets;
 }
 
+// 只更新元数据，不触碰 current_balance/status/account_id。
 bool AssetRepository::update_metadata(const Asset& asset) {
   Statement statement(database_,
                       "UPDATE asset SET name = ?, asset_type = ?, "
@@ -109,6 +119,7 @@ bool AssetRepository::update_metadata(const Asset& asset) {
   return database_.changes() > 0;
 }
 
+// 只改当前价值（分），用于交易后回写余额。
 bool AssetRepository::update_balance(std::int64_t id, std::int64_t current_balance,
                                      const std::string& updated_at) {
   Statement statement(database_,
@@ -117,6 +128,7 @@ bool AssetRepository::update_balance(std::int64_t id, std::int64_t current_balan
   return database_.changes() > 0;
 }
 
+// 只改资产状态（ACTIVE 等），如销户/停用。
 bool AssetRepository::update_status(std::int64_t id, AssetStatus status,
                                     const std::string& updated_at) {
   Statement statement(database_,
@@ -143,6 +155,7 @@ std::int64_t AssetRepository::count_by_account(std::int64_t account_id) {
   return 0;
 }
 
+// 仅汇总 status='ACTIVE' 的资产；COALESCE 保证无匹配行时返回 0 而非 NULL。
 std::int64_t AssetRepository::sum_balance_by_account(std::int64_t account_id) {
   Statement statement(
       database_,
@@ -158,6 +171,8 @@ std::int64_t AssetRepository::sum_balance_by_account(std::int64_t account_id) {
 // ---------------------------------------------------------------------------
 // term_deposit_detail
 // ---------------------------------------------------------------------------
+// upsert 语义：以 asset_id 为唯一键，冲突时用 excluded 值整行覆盖更新，
+// 保证与 asset 的 1:0..1 关系（存在则更新，不存在则插入）。
 void AssetRepository::upsert_term_deposit_detail(const TermDepositDetail& detail) {
   Statement statement(
       database_,
@@ -197,6 +212,9 @@ std::optional<TermDepositDetail> AssetRepository::find_term_deposit_detail(
     return std::nullopt;
   }
   TermDepositDetail detail;
+  // 列下标：0=asset_id 1=principal 2=annual_interest_rate 3=start_date
+  // 4=maturity_date 5=term_value 6=term_unit 7=interest_type 8=auto_rollover
+  // 9=maturity_action
   detail.asset_id = statement.get_int64(0);
   detail.principal = statement.get_int64(1);
   detail.annual_interest_rate = statement.get_int64(2);
@@ -220,6 +238,7 @@ void AssetRepository::delete_term_deposit_detail(std::int64_t asset_id) {
 // ---------------------------------------------------------------------------
 // fund_detail
 // ---------------------------------------------------------------------------
+// upsert 语义同 term_deposit_detail：ON CONFLICT(asset_id) DO UPDATE 整行覆盖。
 void AssetRepository::upsert_fund_detail(const FundDetail& detail) {
   Statement statement(
       database_,
@@ -246,6 +265,8 @@ std::optional<FundDetail> AssetRepository::find_fund_detail(std::int64_t asset_i
     return std::nullopt;
   }
   FundDetail detail;
+  // 列下标：0=asset_id 1=fund_code 2=fund_name 3=fund_type
+  // 4=lock_start_date 5=lock_end_date
   detail.asset_id = statement.get_int64(0);
   detail.fund_code = statement.get_optional_text(1);
   detail.fund_name = statement.get_optional_text(2);
@@ -263,6 +284,7 @@ void AssetRepository::delete_fund_detail(std::int64_t asset_id) {
 // ---------------------------------------------------------------------------
 // bond_detail
 // ---------------------------------------------------------------------------
+// upsert 语义同上：ON CONFLICT(asset_id) DO UPDATE 整行覆盖。
 void AssetRepository::upsert_bond_detail(const BondDetail& detail) {
   Statement statement(
       database_,
@@ -294,6 +316,8 @@ std::optional<BondDetail> AssetRepository::find_bond_detail(std::int64_t asset_i
     return std::nullopt;
   }
   BondDetail detail;
+  // 列下标：0=asset_id 1=bond_code 2=bond_name 3=principal 4=annual_coupon_rate
+  // 5=purchase_date 6=maturity_date 7=lock_end_date
   detail.asset_id = statement.get_int64(0);
   detail.bond_code = statement.get_optional_text(1);
   detail.bond_name = statement.get_optional_text(2);
@@ -313,6 +337,7 @@ void AssetRepository::delete_bond_detail(std::int64_t asset_id) {
 // ---------------------------------------------------------------------------
 // insurance_detail
 // ---------------------------------------------------------------------------
+// upsert 语义同上：ON CONFLICT(asset_id) DO UPDATE 整行覆盖。
 void AssetRepository::upsert_insurance_detail(const InsuranceDetail& detail) {
   Statement statement(
       database_,
@@ -351,6 +376,9 @@ std::optional<InsuranceDetail> AssetRepository::find_insurance_detail(
     return std::nullopt;
   }
   InsuranceDetail detail;
+  // 列下标：0=asset_id 1=policy_no 2=insurance_company 3=product_name
+  // 4=insurance_type 5=effective_date 6=maturity_date 7=annual_premium
+  // 8=total_paid_premium 9=insured_amount 10=payment_years
   detail.asset_id = statement.get_int64(0);
   detail.policy_no = statement.get_optional_text(1);
   detail.insurance_company = statement.get_optional_text(2);

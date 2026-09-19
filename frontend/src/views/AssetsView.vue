@@ -1,3 +1,4 @@
+<!-- 资产管理页：按成员/账户筛选资产，弹窗根据资产类型动态渲染对应明细块（定期/基金/债券/保险）。 -->
 <template>
   <div>
     <div class="toolbar">
@@ -180,6 +181,7 @@
 </template>
 
 <script setup lang="ts">
+// 职责：展示/维护资产列表；弹窗表单按 asset_type 切换明细块，负责「元↔分」「百分数↔定点利率」换算后提交。
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
@@ -198,15 +200,16 @@ import { percentToScaled, scaledToPercent, toMinor, toYuanInput } from '@/utils/
 import type { Asset, AssetStatus, AssetType, TermUnit } from '@/types'
 
 const store = useAppStore()
-const assets = ref<Asset[]>([])
-const loading = ref(false)
-const saving = ref(false)
-const dialogVisible = ref(false)
-const editing = ref<Asset | null>(null)
-const row = ref<Asset | null>(null)
-const filterMember = ref<number | undefined>(undefined)
-const filterAccount = ref<number | undefined>(undefined)
+const assets = ref<Asset[]>([])       // 当前筛选条件下的资产列表
+const loading = ref(false)            // 列表加载中
+const saving = ref(false)             // 表单提交中
+const dialogVisible = ref(false)      // 弹窗显隐
+const editing = ref<Asset | null>(null) // 当前编辑对象，null 表示新增
+const row = ref<Asset | null>(null)   // 当前编辑行，用于判断初始金额是否可改
+const filterMember = ref<number | undefined>(undefined)  // 按成员筛选
+const filterAccount = ref<number | undefined>(undefined) // 按账户筛选
 
+// 资产基本信息表单（金额以「元」字符串编辑，提交时再换算为「分」）。
 const form = reactive({
   account_id: 0,
   name: '',
@@ -215,6 +218,7 @@ const form = reactive({
   remark: '',
 })
 
+// 各类型明细的合并表单：金额以「元」、利率以百分数字符串编辑，仅渲染当前类型所需字段。
 const detail = reactive({
   principal_yuan: '0.00',
   annual_interest_rate_percent: '',
@@ -240,6 +244,7 @@ const detail = reactive({
   insured_amount_yuan: '0.00',
 })
 
+// 将所有明细字段恢复为默认值，避免编辑不同类型时残留旧数据。
 function resetDetail() {
   Object.assign(detail, {
     principal_yuan: '0.00',
@@ -267,6 +272,7 @@ function resetDetail() {
   })
 }
 
+// 按筛选条件拉取资产列表，并同步 store 中的资产缓存（供交易页下拉使用）。
 async function load() {
   if (!store.householdId) {
     return
@@ -285,6 +291,7 @@ async function load() {
   }
 }
 
+// 打开「新增」弹窗，默认账户为第一个、类型为 CASH。
 function openCreate() {
   editing.value = null
   row.value = null
@@ -297,15 +304,17 @@ function openCreate() {
   dialogVisible.value = true
 }
 
+// 打开「编辑」弹窗：基本信息回填，并把「分」金额、「定点利率」分别转成「元」「百分数」展示。
 function openEdit(asset: Asset) {
   editing.value = asset
   row.value = asset
   form.account_id = asset.account_id
   form.name = asset.name
   form.asset_type = asset.asset_type
-  form.opening_balance_yuan = toYuanInput(asset.opening_balance)
+  form.opening_balance_yuan = toYuanInput(asset.opening_balance) // 分 -> 元
   form.remark = asset.remark ?? ''
   resetDetail()
+  // 按存在的明细块分别回填，金额/利率做展示口径转换。
   if (asset.term_deposit) {
     detail.principal_yuan = toYuanInput(asset.term_deposit.principal)
     detail.annual_interest_rate_percent = scaledToPercent(asset.term_deposit.annual_interest_rate)
@@ -340,6 +349,7 @@ function openEdit(asset: Asset) {
   dialogVisible.value = true
 }
 
+// 根据资产类型把明细表单组装为后端所需 payload：金额转「分」，利率转定点整数；无明细类型返回 null。
 function buildDetail(type: AssetType): Record<string, unknown> | null {
   if (type === 'TERM_DEPOSIT') {
     return {
@@ -383,6 +393,7 @@ function buildDetail(type: AssetType): Record<string, unknown> | null {
   return null
 }
 
+// 资产类型 -> 后端明细块字段名 的映射，用于提交时组装 detail_type 与对应明细键。
 const detailKey: Partial<Record<AssetType, string>> = {
   TERM_DEPOSIT: 'term_deposit',
   FUND: 'fund',
@@ -390,6 +401,7 @@ const detailKey: Partial<Record<AssetType, string>> = {
   INSURANCE: 'insurance',
 }
 
+// 校验账户与名称后提交：编辑走「基本信息 + 明细」两个接口，新增则合并为一个 payload。
 async function save() {
   if (!form.account_id) {
     ElMessage.warning('请选择账户')
@@ -437,6 +449,7 @@ async function save() {
   }
 }
 
+// 切换资产启停状态，关闭前二次确认，成功后在当前筛选条件下重新加载。
 async function toggleStatus(asset: Asset) {
   const next: AssetStatus = asset.status === 'ACTIVE' ? 'CLOSED' : 'ACTIVE'
   try {

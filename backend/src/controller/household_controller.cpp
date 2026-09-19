@@ -1,3 +1,4 @@
+// 家庭控制器实现：解析请求 -> 调用 HouseholdService -> 序列化 JSON。
 #include "controller/household_controller.hpp"
 
 #include <cstdint>
@@ -12,6 +13,7 @@
 namespace wt {
 
 void HouseholdController::register_routes(crow::SimpleApp& app) {
+  // GET /api/households：列出全部家庭。
   CROW_ROUTE(app, "/api/households").methods("GET"_method)([this] {
     return http::handle([this] {
       nlohmann::json data = nlohmann::json::array();
@@ -22,6 +24,7 @@ void HouseholdController::register_routes(crow::SimpleApp& app) {
     });
   });
 
+  // POST /api/households：新建家庭，请求体可选 name，缺省用「我的家庭」。
   CROW_ROUTE(app, "/api/households").methods("POST"_method)(
       [this](const crow::request& request) {
         return http::handle([this, &request] {
@@ -31,10 +34,12 @@ void HouseholdController::register_routes(crow::SimpleApp& app) {
         });
       });
 
+  // GET /api/households/<int>：按 id 查询家庭。
   CROW_ROUTE(app, "/api/households/<int>").methods("GET"_method)([this](int id) {
     return http::handle([this, id] { return dto::to_json(service_.get(id)); });
   });
 
+  // PUT /api/households/<int>：更新家庭名称；请求体 name 为空或未提供时沿用原名。
   CROW_ROUTE(app, "/api/households/<int>").methods("PUT"_method)(
       [this](const crow::request& request, int id) {
         return http::handle([this, &request, id] {
