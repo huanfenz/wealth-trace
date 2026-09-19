@@ -1,0 +1,24 @@
+{
+  "server": {
+    "host": "127.0.0.1",
+    "port": 8080,
+    "threads": 4
+  },
+  "database": {
+    "path": "data/caiji.db",
+    "migrations_dir": "migrations",
+    "busy_timeout_ms": 5000,
+    "wal": true
+  },
+  "log": {
+    "level": "info"
+  },
+  "frontend": {
+    "dir": "frontend/dist",
+    "enabled": true
+  },
+  "categories": {
+    "expense": ["餐饮", "交通", "购物", "娱乐", "居住", "医疗", "教育", "通讯", "人情", "其他"],
+    "income": ["工资", "奖金", "红包", "利息收入", "投资收益", "退款", "其他"]
+  }
+}

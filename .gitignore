@@ -1,0 +1,14 @@
+# Build output
+/build/
+/frontend/dist/
+/frontend/node_modules/
+
+# Runtime data (SQLite database and WAL files)
+/data/*
+!/data/.gitkeep
+
+# Editor / OS noise
+*.o
+*.obj
+*.swp
+.DS_Store
