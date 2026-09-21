@@ -30,7 +30,7 @@ class AccountService {
  public:
   explicit AccountService(Database& database)
       : households_(database), members_(database), accounts_(database),
-        assets_(database) {}
+        assets_(database), database_(database) {}
 
   // 新建账户：先校验家庭与属主成员存在且属于同一家庭（否则 not_found /
   // invalid_request），再校验 name 并清洗可选字段。返回带 id 的账户。
@@ -74,6 +74,7 @@ class AccountService {
   MemberRepository members_;
   AccountRepository accounts_;
   AssetRepository assets_;
+  Database& database_;
 };
 
 }  // namespace wt

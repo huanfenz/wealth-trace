@@ -13,6 +13,7 @@
 namespace wt {
 
 Household HouseholdService::create(const std::string& name) {
+  std::scoped_lock lock(database_.mutex());
   Household household;
   // 名称做去空白与长度校验；创建/更新时间统一用 UTC 格式，二者初始相同。
   household.name = strings::require_text(name, "name", 100);
@@ -22,9 +23,13 @@ Household HouseholdService::create(const std::string& name) {
   return household;
 }
 
-std::vector<Household> HouseholdService::list() { return households_.list(); }
+std::vector<Household> HouseholdService::list() {
+  std::scoped_lock lock(database_.mutex());
+  return households_.list();
+}
 
 Household HouseholdService::get(std::int64_t id) {
+  std::scoped_lock lock(database_.mutex());
   const auto household = households_.find_by_id(id);
   if (!household.has_value()) {
     throw not_found("household not found");
@@ -33,6 +38,7 @@ Household HouseholdService::get(std::int64_t id) {
 }
 
 Household HouseholdService::update(std::int64_t id, const std::string& name) {
+  std::scoped_lock lock(database_.mutex());
   // 先取原记录（不存在即抛 not_found），只改名称与 updated_at。
   Household household = get(id);
   household.name = strings::require_text(name, "name", 100);
@@ -42,6 +48,7 @@ Household HouseholdService::update(std::int64_t id, const std::string& name) {
 }
 
 Household HouseholdService::ensure_default(const std::string& name) {
+  std::scoped_lock lock(database_.mutex());
   // 空库时懒创建默认家庭；已有家庭则复用第一个，使调用方幂等，
   // 不会因重复启动而制造出多个家庭。
   if (households_.count() == 0) {

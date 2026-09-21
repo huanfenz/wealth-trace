@@ -70,10 +70,14 @@ void AssetService::validate_detail_combination(const Asset& asset,
   }
 }
 
-AssetBundle AssetService::create(const AssetCreateInput& input) {
+AssetBundle AssetService::create(std::int64_t household_id, const AssetCreateInput& input) {
+  std::scoped_lock lock(database_.mutex());
   const auto account = accounts_.find_by_id(input.account_id);
   if (!account.has_value()) {
     throw not_found("account not found");
+  }
+  if (account->household_id != household_id) {
+    throw invalid_request("account does not belong to the household");
   }
 
   Asset asset;
@@ -125,9 +129,13 @@ AssetBundle AssetService::create(const AssetCreateInput& input) {
   return load_bundle(asset);
 }
 
-AssetBundle AssetService::get_bundle(std::int64_t id) { return load_bundle(get(id)); }
+AssetBundle AssetService::get_bundle(std::int64_t id) {
+  std::scoped_lock lock(database_.mutex());
+  return load_bundle(get(id));
+}
 
 Asset AssetService::get(std::int64_t id) {
+  std::scoped_lock lock(database_.mutex());
   const auto asset = assets_.find_by_id(id);
   if (!asset.has_value()) {
     throw not_found("asset not found");
@@ -138,6 +146,7 @@ Asset AssetService::get(std::int64_t id) {
 std::vector<AssetBundle> AssetService::list_bundles(
     std::int64_t household_id, std::optional<std::int64_t> owner_member_id,
     std::optional<std::int64_t> account_id) {
+  std::scoped_lock lock(database_.mutex());
   const auto assets = assets_.list_by_household(household_id, owner_member_id, account_id);
   std::vector<AssetBundle> bundles;
   bundles.reserve(assets.size());
@@ -174,6 +183,7 @@ AssetBundle AssetService::load_bundle(const Asset& asset) {
 Asset AssetService::update_metadata(std::int64_t id, const std::string& name,
                                     std::optional<std::int64_t> opening_balance,
                                     const std::optional<std::string>& remark) {
+  std::scoped_lock lock(database_.mutex());
   Asset asset = get(id);
   asset.name = strings::require_text(name, "name", 100);
   asset.remark = clean_optional(remark, "remark", 500);
@@ -209,6 +219,7 @@ Asset AssetService::update_metadata(std::int64_t id, const std::string& name,
 
 Asset AssetService::update_status(std::int64_t id, AssetStatus status) {
   // 关闭（CLOSED）后资产不计入统计，并由交易服务拒绝新流水；此处仅改状态。
+  std::scoped_lock lock(database_.mutex());
   Asset asset = get(id);
   asset.status = status;
   asset.updated_at = time_util::now_iso8601();
@@ -220,6 +231,7 @@ AssetBundle AssetService::update_detail(std::int64_t id, AssetType detail_type,
                                         const TermDepositDetail* term_deposit,
                                         const FundDetail* fund, const BondDetail* bond,
                                         const InsuranceDetail* insurance) {
+  std::scoped_lock lock(database_.mutex());
   Asset asset = get(id);
   // 只能更新与资产自身类型相符的明细，防止明细与 asset_type 错配。
   if (detail_type != asset.asset_type) {

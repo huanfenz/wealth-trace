@@ -151,8 +151,8 @@ void AssetController::register_routes(crow::SimpleApp& app) {
   // POST /api/households/<int>/assets：新建资产；account_id/name/asset_type
   // 必填，opening_balance、remark 可选，四个明细块按资产类型选填。
   CROW_ROUTE(app, "/api/households/<int>/assets").methods("POST"_method)(
-      [this](const crow::request& request, int /*id*/) {
-        return http::handle([this, &request] {
+      [this](const crow::request& request, int id) {
+        return http::handle([this, &request, id] {
           const auto body = dto::parse_object(request.body);
           AssetCreateInput input;
           input.account_id = dto::require_int64(body, "account_id");
@@ -164,7 +164,7 @@ void AssetController::register_routes(crow::SimpleApp& app) {
           input.fund = parse_fund(body);
           input.bond = parse_bond(body);
           input.insurance = parse_insurance(body);
-          return dto::to_json(service_.create(input));
+          return dto::to_json(service_.create(id, input));
         });
       });
 

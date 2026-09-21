@@ -47,7 +47,7 @@ struct PeriodStatistics {
 class StatisticsService {
  public:
   explicit StatisticsService(Database& database)
-      : households_(database), statistics_(database) {}
+      : households_(database), statistics_(database), database_(database) {}
 
   // 家庭总览：先取当前资产/负债/净值与各维度分布，再把 year-month 这个
   // 自然月换算成 [月初 00:00:00, 月末 23:59:59] 闭区间统计当月收支。
@@ -67,6 +67,7 @@ class StatisticsService {
 
   HouseholdRepository households_;
   StatisticsRepository statistics_;
+  Database& database_;
 };
 
 }  // namespace wt

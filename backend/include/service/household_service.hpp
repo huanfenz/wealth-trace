@@ -16,7 +16,7 @@ class Database;
 // 本服务只做文本校验与持久化，不涉及金额或事务。
 class HouseholdService {
  public:
-  explicit HouseholdService(Database& database) : households_(database) {}
+  explicit HouseholdService(Database& database) : households_(database), database_(database) {}
 
   // 新建家庭：name 去首尾空白且长度不超过 100，否则抛 invalid_request。
   // 返回带自增 id、created_at/updated_at 的家庭。
@@ -37,6 +37,7 @@ class HouseholdService {
 
  private:
   HouseholdRepository households_;
+  Database& database_;
 };
 
 }  // namespace wt

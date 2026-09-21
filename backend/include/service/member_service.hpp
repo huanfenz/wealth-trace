@@ -18,7 +18,7 @@ class Database;
 class MemberService {
  public:
   explicit MemberService(Database& database)
-      : households_(database), members_(database) {}
+      : households_(database), members_(database), database_(database) {}
 
   // 在指定家庭下新建成员：先校验家庭存在（否则 not_found），name 去空白且
   // 长度不超过 100（否则 invalid_request）。role/status 由调用方给定。
@@ -41,6 +41,7 @@ class MemberService {
 
   HouseholdRepository households_;
   MemberRepository members_;
+  Database& database_;
 };
 
 }  // namespace wt

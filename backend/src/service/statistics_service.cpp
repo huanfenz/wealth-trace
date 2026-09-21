@@ -53,6 +53,7 @@ void StatisticsService::require_household(std::int64_t household_id) {
 
 HouseholdOverview StatisticsService::overview(std::int64_t household_id, int year,
                                               int month) {
+  std::scoped_lock lock(database_.mutex());
   require_household(household_id);
   // 年份限制在 4 位可表示范围，月份 1..12，防止生成非法时间串。
   if (year < 1970 || year > 9999) {
@@ -87,6 +88,7 @@ HouseholdOverview StatisticsService::overview(std::int64_t household_id, int yea
 PeriodStatistics StatisticsService::period(
     std::int64_t household_id, const std::string& from_time, const std::string& to_time,
     std::optional<std::int64_t> member_id) {
+  std::scoped_lock lock(database_.mutex());
   require_household(household_id);
   PeriodStatistics result;
   // 两端时间都要求合法 UTC 格式；字符串按 ISO8601 字典序比较即等价于时间先后。

@@ -54,6 +54,7 @@ Account AccountService::create(std::int64_t household_id, std::int64_t owner_mem
                                const std::optional<std::string>& institution_name,
                                const std::optional<std::string>& account_no_masked,
                                const std::optional<std::string>& remark, bool enabled) {
+  std::scoped_lock lock(database_.mutex());
   require_household(household_id);
   require_member(household_id, owner_member_id);
 
@@ -75,12 +76,14 @@ Account AccountService::create(std::int64_t household_id, std::int64_t owner_mem
 
 std::vector<Account> AccountService::list(std::int64_t household_id,
                                           std::optional<std::int64_t> owner_member_id) {
+  std::scoped_lock lock(database_.mutex());
   require_household(household_id);
   return accounts_.list_by_household(household_id, owner_member_id);
 }
 
 std::vector<AccountView> AccountService::list_views(
     std::int64_t household_id, std::optional<std::int64_t> owner_member_id) {
+  std::scoped_lock lock(database_.mutex());
   // 先复用 list 拿到账户集合，再逐个查其资产余额与数量；
   // 负债资产余额为负，聚合后自然从账户总额中抵减。
   const auto accounts = list(household_id, owner_member_id);
@@ -97,6 +100,7 @@ std::vector<AccountView> AccountService::list_views(
 }
 
 AccountView AccountService::get_view(std::int64_t id) {
+  std::scoped_lock lock(database_.mutex());
   // get(id) 负责不存在时抛 not_found，这里只补充聚合字段。
   AccountView view;
   view.account = get(id);
@@ -106,6 +110,7 @@ AccountView AccountService::get_view(std::int64_t id) {
 }
 
 Account AccountService::get(std::int64_t id) {
+  std::scoped_lock lock(database_.mutex());
   const auto account = accounts_.find_by_id(id);
   if (!account.has_value()) {
     throw not_found("account not found");
@@ -118,6 +123,7 @@ Account AccountService::update(std::int64_t id, std::int64_t owner_member_id,
                                const std::optional<std::string>& institution_name,
                                const std::optional<std::string>& account_no_masked,
                                const std::optional<std::string>& remark, bool enabled) {
+  std::scoped_lock lock(database_.mutex());
   Account account = get(id);
   if (owner_member_id != account.owner_member_id) {
     // 资产与交易冗余保存了由账户派生的 owner_member_id。若账户下已有资产，

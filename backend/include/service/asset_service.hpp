@@ -49,7 +49,7 @@ class AssetService {
   // 创建资产：账户不存在抛 not_found；校验 opening_balance 符号与明细组合，
   // 在事务中同时写入资产与（可选）明细，全成功或全回滚。
   // current_balance 初始化为 opening_balance（此时还没有任何交易）。
-  AssetBundle create(const AssetCreateInput& input);
+  AssetBundle create(std::int64_t household_id, const AssetCreateInput& input);
 
   // 获取资产及其明细聚合；资产不存在抛 not_found。
   AssetBundle get_bundle(std::int64_t id);

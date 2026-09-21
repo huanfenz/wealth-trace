@@ -50,7 +50,7 @@ std::optional<std::string> clean_remark(const std::optional<std::string>& remark
 }  // namespace
 
 Transaction TransactionService::record(
-    TransactionType type, std::int64_t asset_id,
+    std::int64_t household_id, TransactionType type, std::int64_t asset_id,
     const std::optional<std::string>& category, std::int64_t amount,
     const std::string& transaction_time, const std::optional<std::string>& remark) {
   // 金额规则：任何类型都不得为 0；除 ADJUSTMENT 外，amount 统一存正数
@@ -65,6 +65,9 @@ Transaction TransactionService::record(
   const auto asset = assets_.find_by_id(asset_id);
   if (!asset.has_value()) {
     throw not_found("asset not found");
+  }
+  if (asset->household_id != household_id) {
+    throw invalid_request("asset does not belong to the household");
   }
   // 已关闭资产冻结：既不计入统计，也不能再产生流水。
   if (asset->status != AssetStatus::Active) {
@@ -105,35 +108,43 @@ Transaction TransactionService::record(
 
 // 收入：余额 +amount。
 Transaction TransactionService::record_income(
-    std::int64_t asset_id, const std::optional<std::string>& category,
+    std::int64_t household_id, std::int64_t asset_id,
+    const std::optional<std::string>& category,
     std::int64_t amount, const std::string& transaction_time,
     const std::optional<std::string>& remark) {
-  return record(TransactionType::Income, asset_id, category, amount, transaction_time,
+  std::scoped_lock lock(database_.mutex());
+  return record(household_id, TransactionType::Income, asset_id, category, amount, transaction_time,
                 remark);
 }
 
 // 支出：余额 -amount。
 Transaction TransactionService::record_expense(
-    std::int64_t asset_id, const std::optional<std::string>& category,
+    std::int64_t household_id, std::int64_t asset_id,
+    const std::optional<std::string>& category,
     std::int64_t amount, const std::string& transaction_time,
     const std::optional<std::string>& remark) {
-  return record(TransactionType::Expense, asset_id, category, amount, transaction_time,
+  std::scoped_lock lock(database_.mutex());
+  return record(household_id, TransactionType::Expense, asset_id, category, amount, transaction_time,
                 remark);
 }
 
 // 调整：余额直接 +amount（amount 可负）；调整无需分类，故 category 传 nullopt。
 Transaction TransactionService::record_adjustment(
-    std::int64_t asset_id, std::int64_t amount, const std::string& transaction_time,
+    std::int64_t household_id, std::int64_t asset_id, std::int64_t amount,
+    const std::string& transaction_time,
     const std::optional<std::string>& remark) {
-  return record(TransactionType::Adjustment, asset_id, std::nullopt, amount,
+  std::scoped_lock lock(database_.mutex());
+  return record(household_id, TransactionType::Adjustment, asset_id, std::nullopt, amount,
                 transaction_time, remark);
 }
 
-TransferResult TransactionService::transfer(std::int64_t from_asset_id,
+TransferResult TransactionService::transfer(std::int64_t household_id,
+                                            std::int64_t from_asset_id,
                                             std::int64_t to_asset_id,
                                             std::int64_t amount,
                                             const std::string& transaction_time,
                                             const std::optional<std::string>& remark) {
+  std::scoped_lock lock(database_.mutex());
   // 转账金额必须为正：方向由「转出/转入」两个端点决定，不靠符号。
   if (amount <= 0) {
     throw invalid_request("transfer amount must be positive");
@@ -150,6 +161,9 @@ TransferResult TransactionService::transfer(std::int64_t from_asset_id,
     throw not_found("target asset not found");
   }
   // 仅支持同一家庭内部转账：跨家庭会破坏家庭资产边界的封闭性。
+  if (from->household_id != household_id || to->household_id != household_id) {
+    throw invalid_request("transfer assets do not belong to the household");
+  }
   if (from->household_id != to->household_id) {
     throw invalid_request("cross-household transfer is not supported");
   }
@@ -218,14 +232,17 @@ TransferResult TransactionService::transfer(std::int64_t from_asset_id,
 }
 
 std::vector<Transaction> TransactionService::list(const TransactionQuery& query) {
+  std::scoped_lock lock(database_.mutex());
   return transactions_.list(query);
 }
 
 std::int64_t TransactionService::count(const TransactionQuery& query) {
+  std::scoped_lock lock(database_.mutex());
   return transactions_.count(query);
 }
 
 Transaction TransactionService::get(std::int64_t id) {
+  std::scoped_lock lock(database_.mutex());
   const auto transaction = transactions_.find_by_id(id);
   if (!transaction.has_value()) {
     throw not_found("transaction not found");

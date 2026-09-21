@@ -140,6 +140,21 @@ meson compile -C build
 
 ## 5. 前端启动
 
+### 一键构建与运行
+
+在项目根目录执行：
+
+```bash
+# 开发：构建后端，启动后端 :8080 和 Vite :5173（支持热更新）
+bash scripts/run.sh dev
+
+# 生产：构建前后端；后端在 :8080 托管 frontend/dist
+bash scripts/run.sh prod
+```
+
+也可以在模式后传入自定义配置文件：`bash scripts/run.sh prod /path/to/config.json`。
+首次运行时，脚本会在缺少 `frontend/node_modules` 的情况下自动安装前端依赖。开发模式访问 `http://127.0.0.1:5173`；生产模式访问 `http://127.0.0.1:8080`。按 `Ctrl-C` 停止服务。
+
 开发模式（Vite dev server，自动把 `/api` 代理到 `127.0.0.1:8080`）：
 
 ```bash

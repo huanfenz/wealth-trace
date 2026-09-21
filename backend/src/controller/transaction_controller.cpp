@@ -70,13 +70,13 @@ void TransactionController::register_routes(crow::SimpleApp& app) {
   // POST /api/households/<int>/transactions/income：记一笔收入；
   // asset_id、amount（分）必填，category/transaction_time/remark 可选。
   CROW_ROUTE(app, "/api/households/<int>/transactions/income").methods("POST"_method)(
-      [this](const crow::request& request, int /*id*/) {
-        return http::handle([this, &request] {
+      [this](const crow::request& request, int id) {
+        return http::handle([this, &request, id] {
           const auto body = dto::parse_object(request.body);
           const auto asset_id = dto::require_int64(body, "asset_id");
           const auto amount = dto::require_int64(body, "amount");
           return dto::to_json(service_.record_income(
-              asset_id, body_category(body), amount, body_time(body).value_or(""),
+              id, asset_id, body_category(body), amount, body_time(body).value_or(""),
               body_remark(body)));
         });
       });
@@ -84,13 +84,13 @@ void TransactionController::register_routes(crow::SimpleApp& app) {
   // POST /api/households/<int>/transactions/expense：记一笔支出；
   // asset_id、amount（分）必填，category/transaction_time/remark 可选。
   CROW_ROUTE(app, "/api/households/<int>/transactions/expense").methods("POST"_method)(
-      [this](const crow::request& request, int /*id*/) {
-        return http::handle([this, &request] {
+      [this](const crow::request& request, int id) {
+        return http::handle([this, &request, id] {
           const auto body = dto::parse_object(request.body);
           const auto asset_id = dto::require_int64(body, "asset_id");
           const auto amount = dto::require_int64(body, "amount");
           return dto::to_json(service_.record_expense(
-              asset_id, body_category(body), amount, body_time(body).value_or(""),
+              id, asset_id, body_category(body), amount, body_time(body).value_or(""),
               body_remark(body)));
         });
       });
@@ -98,26 +98,26 @@ void TransactionController::register_routes(crow::SimpleApp& app) {
   // POST /api/households/<int>/transactions/adjustment：对资产做余额调整；
   // asset_id、amount（分）必填。
   CROW_ROUTE(app, "/api/households/<int>/transactions/adjustment")
-      .methods("POST"_method)([this](const crow::request& request, int /*id*/) {
-        return http::handle([this, &request] {
+      .methods("POST"_method)([this](const crow::request& request, int id) {
+        return http::handle([this, &request, id] {
           const auto body = dto::parse_object(request.body);
           const auto asset_id = dto::require_int64(body, "asset_id");
           const auto amount = dto::require_int64(body, "amount");
           return dto::to_json(service_.record_adjustment(
-              asset_id, amount, body_time(body).value_or(""), body_remark(body)));
+              id, asset_id, amount, body_time(body).value_or(""), body_remark(body)));
         });
       });
 
   // POST /api/households/<int>/transfers：资产间转账，生成一对转出/转入流水；
   // from_asset_id、to_asset_id、amount（分）必填。
   CROW_ROUTE(app, "/api/households/<int>/transfers").methods("POST"_method)(
-      [this](const crow::request& request, int /*id*/) {
-        return http::handle([this, &request] {
+      [this](const crow::request& request, int id) {
+        return http::handle([this, &request, id] {
           const auto body = dto::parse_object(request.body);
           const auto from_asset_id = dto::require_int64(body, "from_asset_id");
           const auto to_asset_id = dto::require_int64(body, "to_asset_id");
           const auto amount = dto::require_int64(body, "amount");
-          return dto::to_json(service_.transfer(from_asset_id, to_asset_id, amount,
+          return dto::to_json(service_.transfer(id, from_asset_id, to_asset_id, amount,
                                                 body_time(body).value_or(""),
                                                 body_remark(body)));
         });

@@ -4,6 +4,7 @@
 // 分层约定：位于 Repository 之下，只负责连接、PRAGMA 设置与错误映射。
 
 #include <cstdint>
+#include <mutex>
 #include <string>
 #include <string_view>
 
@@ -53,8 +54,13 @@ class Database {
   std::int64_t last_insert_rowid() const;
   int changes() const;
 
+  // 该连接会被多个 HTTP 工作线程共享。事务属于连接而非线程，因此服务层必须
+  // 在一次完整业务操作期间持有此锁，不能只锁住单条 SQL。
+  std::recursive_mutex& mutex() noexcept { return mutex_; }
+
  private:
   sqlite3* handle_ = nullptr;
+  std::recursive_mutex mutex_;
 };
 
 }  // namespace wt

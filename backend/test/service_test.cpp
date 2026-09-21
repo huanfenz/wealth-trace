@@ -1,8 +1,12 @@
 #include <gtest/gtest.h>
 
+#include <atomic>
+#include <barrier>
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <thread>
+#include <vector>
 
 #include "common/error.hpp"
 #include "database/database.hpp"
@@ -55,7 +59,7 @@ class ServiceFixture : public ::testing::Test {
     input.name = name;
     input.asset_type = type;
     input.opening_balance = opening_balance;
-    return assets.create(input).asset;
+    return assets.create(household_.id, input).asset;
   }
 
   Database database_;
@@ -69,11 +73,11 @@ TEST_F(ServiceFixture, IncomeAndExpenseUpdateBalance) {
   const Asset cash = make_asset("活期", AssetType::Cash, 2000000);
   TransactionService transactions(database_);
 
-  const auto income = transactions.record_income(cash.id, "工资", 1000000, "", std::nullopt);
+  const auto income = transactions.record_income(household_.id, cash.id, "工资", 1000000, "", std::nullopt);
   EXPECT_EQ(income.balance_before.value(), 2000000);
   EXPECT_EQ(income.balance_after.value(), 3000000);
 
-  const auto expense = transactions.record_expense(cash.id, "餐饮", 3500, "", std::nullopt);
+  const auto expense = transactions.record_expense(household_.id, cash.id, "餐饮", 3500, "", std::nullopt);
   EXPECT_EQ(expense.balance_before.value(), 3000000);
   EXPECT_EQ(expense.balance_after.value(), 2996500);
 
@@ -88,7 +92,7 @@ TEST_F(ServiceFixture, TransferMovesFundsAndLinksGroup) {
   const Asset fund = make_asset("某基金", AssetType::Fund, 500000);
   TransactionService transactions(database_);
 
-  const auto result = transactions.transfer(cash.id, fund.id, 300000, "", std::nullopt);
+  const auto result = transactions.transfer(household_.id, cash.id, fund.id, 300000, "", std::nullopt);
   EXPECT_EQ(result.outgoing.type, TransactionType::TransferOut);
   EXPECT_EQ(result.incoming.type, TransactionType::TransferIn);
   ASSERT_TRUE(result.outgoing.transfer_group_id.has_value());
@@ -123,21 +127,76 @@ TEST_F(ServiceFixture, CrossHouseholdTransferRejected) {
   input.name = "活期";
   input.asset_type = AssetType::Cash;
   input.opening_balance = 500000;
-  const Asset other_cash = assets.create(input).asset;
+  const Asset other_cash = assets.create(other.id, input).asset;
 
   TransactionService transactions(database_);
-  EXPECT_THROW(transactions.transfer(cash.id, other_cash.id, 100000, "", std::nullopt),
+  EXPECT_THROW(transactions.transfer(household_.id, cash.id, other_cash.id, 100000, "", std::nullopt),
                ApiError);
 
   EXPECT_EQ(assets.get(cash.id).current_balance, 1000000);
   EXPECT_EQ(assets.get(other_cash.id).current_balance, 500000);
 }
 
+// 写接口中的 household_id 是实际的归属边界：不得借用其他家庭的账户或资产。
+TEST_F(ServiceFixture, HouseholdScopedWritesRejectForeignResources) {
+  HouseholdService households(database_);
+  const Household other = households.create("另一个家庭");
+  MemberService members(database_);
+  const HouseholdMember other_member =
+      members.create(other.id, "配偶", MemberRole::Member, MemberStatus::Active);
+  AccountService accounts(database_);
+  const Account other_account =
+      accounts.create(other.id, other_member.id, "招商银行", AccountType::Bank, std::nullopt,
+                      std::nullopt, std::nullopt, true);
+
+  AssetService assets(database_);
+  AssetCreateInput input;
+  input.account_id = other_account.id;
+  input.name = "外部活期";
+  input.asset_type = AssetType::Cash;
+  EXPECT_THROW(assets.create(household_.id, input), ApiError);
+
+  const Asset foreign_asset = assets.create(other.id, input).asset;
+  TransactionService transactions(database_);
+  EXPECT_THROW(transactions.record_income(household_.id, foreign_asset.id, "工资", 100,
+                                          "", std::nullopt),
+               ApiError);
+}
+
+// 多个请求共享同一连接时，服务层锁必须让整笔记账串行，不能让事务交叉。
+TEST_F(ServiceFixture, ConcurrentRecordsRemainConsistent) {
+  const Asset cash = make_asset("活期", AssetType::Cash, 0);
+  constexpr int kWriters = 8;
+  std::barrier start(kWriters);
+  std::atomic<int> successes = 0;
+  std::vector<std::thread> threads;
+  threads.reserve(kWriters);
+  for (int i = 0; i < kWriters; ++i) {
+    threads.emplace_back([&] {
+      TransactionService transactions(database_);
+      start.arrive_and_wait();
+      transactions.record_income(household_.id, cash.id, "工资", 100, "", std::nullopt);
+      ++successes;
+    });
+  }
+  for (auto& thread : threads) {
+    thread.join();
+  }
+
+  EXPECT_EQ(successes, kWriters);
+  AssetService assets(database_);
+  EXPECT_EQ(assets.get(cash.id).current_balance, kWriters * 100);
+  TransactionService transactions(database_);
+  TransactionQuery query;
+  query.household_id = household_.id;
+  EXPECT_EQ(transactions.count(query), kWriters);
+}
+
 // 验证禁止向同一资产自身转账。
 TEST_F(ServiceFixture, TransferToSameAssetRejected) {
   const Asset cash = make_asset("活期", AssetType::Cash, 1000000);
   TransactionService transactions(database_);
-  EXPECT_THROW(transactions.transfer(cash.id, cash.id, 100000, "", std::nullopt), ApiError);
+  EXPECT_THROW(transactions.transfer(household_.id, cash.id, cash.id, 100000, "", std::nullopt), ApiError);
 }
 
 // 验证调整金额可正可负：正数入账、负数扣减，累计后反映到当前余额。
@@ -145,8 +204,8 @@ TEST_F(ServiceFixture, AdjustmentAppliesSignedAmount) {
   const Asset fund = make_asset("某基金", AssetType::Fund, 5000000);
   TransactionService transactions(database_);
 
-  transactions.record_adjustment(fund.id, 100000, "", std::nullopt);
-  transactions.record_adjustment(fund.id, -250000, "", std::nullopt);
+  transactions.record_adjustment(household_.id, fund.id, 100000, "", std::nullopt);
+  transactions.record_adjustment(household_.id, fund.id, -250000, "", std::nullopt);
 
   AssetService assets(database_);
   EXPECT_EQ(assets.get(fund.id).current_balance, 4850000);
@@ -159,14 +218,14 @@ TEST_F(ServiceFixture, ClosedAssetRejectsTransactions) {
   assets.update_status(cash.id, AssetStatus::Closed);
 
   TransactionService transactions(database_);
-  EXPECT_THROW(transactions.record_income(cash.id, "工资", 100, "", std::nullopt), ApiError);
+  EXPECT_THROW(transactions.record_income(household_.id, cash.id, "工资", 100, "", std::nullopt), ApiError);
 }
 
 // 验证负债类资产的消费支出会使其负数余额变得更负（负债增加）。
 TEST_F(ServiceFixture, LiabilityExpenseIncreasesDebt) {
   const Asset card = make_asset("信用卡", AssetType::Liability, 0);
   TransactionService transactions(database_);
-  transactions.record_expense(card.id, "餐饮", 10000, "", std::nullopt);
+  transactions.record_expense(household_.id, card.id, "餐饮", 10000, "", std::nullopt);
 
   AssetService assets(database_);
   EXPECT_EQ(assets.get(card.id).current_balance, -10000);
@@ -178,9 +237,9 @@ TEST_F(ServiceFixture, StatisticsReflectBalancesAndFlow) {
   const Asset cash = make_asset("活期", AssetType::Cash, 2000000);
   const Asset card = make_asset("信用卡", AssetType::Liability, 0);
   TransactionService transactions(database_);
-  transactions.record_income(cash.id, "工资", 1000000, "", std::nullopt);
-  transactions.record_expense(cash.id, "餐饮", 50000, "", std::nullopt);
-  transactions.record_expense(card.id, "购物", 30000, "", std::nullopt);
+  transactions.record_income(household_.id, cash.id, "工资", 1000000, "", std::nullopt);
+  transactions.record_expense(household_.id, cash.id, "餐饮", 50000, "", std::nullopt);
+  transactions.record_expense(household_.id, card.id, "购物", 30000, "", std::nullopt);
 
   StatisticsService statistics(database_);
   const std::string today = time_util::today_iso8601();
@@ -213,7 +272,7 @@ TEST_F(ServiceFixture, AccountOwnerChangeBlockedWhileAssetsExist) {
 TEST_F(ServiceFixture, OpeningBalanceChangeBlockedAfterTransactions) {
   const Asset cash = make_asset("活期", AssetType::Cash, 1000000);
   TransactionService transactions(database_);
-  transactions.record_income(cash.id, "工资", 100, "", std::nullopt);
+  transactions.record_income(household_.id, cash.id, "工资", 100, "", std::nullopt);
 
   AssetService assets(database_);
   EXPECT_THROW(assets.update_metadata(cash.id, cash.name, 2000000, std::nullopt), ApiError);
@@ -239,18 +298,18 @@ TEST_F(ServiceFixture, DetailTypeMustMatchAssetType) {
   FundDetail fund;
   fund.fund_code = "000001";
   input.fund = fund;
-  EXPECT_THROW(assets.create(input), ApiError);
+  EXPECT_THROW(assets.create(household_.id, input), ApiError);
 }
 
 // 验证非法金额被拒绝：收入不得为 0、支出不得为负、转账金额不得为 0。
 TEST_F(ServiceFixture, InvalidAmountsRejected) {
   const Asset cash = make_asset("活期", AssetType::Cash, 1000000);
   TransactionService transactions(database_);
-  EXPECT_THROW(transactions.record_income(cash.id, std::nullopt, 0, "", std::nullopt),
+  EXPECT_THROW(transactions.record_income(household_.id, cash.id, std::nullopt, 0, "", std::nullopt),
                ApiError);
-  EXPECT_THROW(transactions.record_expense(cash.id, std::nullopt, -100, "", std::nullopt),
+  EXPECT_THROW(transactions.record_expense(household_.id, cash.id, std::nullopt, -100, "", std::nullopt),
                ApiError);
-  EXPECT_THROW(transactions.transfer(cash.id, cash.id, 0, "", std::nullopt), ApiError);
+  EXPECT_THROW(transactions.transfer(household_.id, cash.id, cash.id, 0, "", std::nullopt), ApiError);
 }
 
 // 验证负债资产的期初余额必须为非正数，传入正数应被拒绝。
@@ -261,7 +320,7 @@ TEST_F(ServiceFixture, LiabilityOpeningBalanceMustBeNonPositive) {
   input.name = "信用卡";
   input.asset_type = AssetType::Liability;
   input.opening_balance = 100;
-  EXPECT_THROW(assets.create(input), ApiError);
+  EXPECT_THROW(assets.create(household_.id, input), ApiError);
 }
 
 }  // namespace

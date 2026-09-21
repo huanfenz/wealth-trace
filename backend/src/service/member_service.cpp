@@ -21,6 +21,7 @@ void MemberService::require_household(std::int64_t household_id) {
 HouseholdMember MemberService::create(std::int64_t household_id,
                                       const std::string& name, MemberRole role,
                                       MemberStatus status) {
+  std::scoped_lock lock(database_.mutex());
   // 成员必须挂在真实存在的家庭下，否则后续账户/资产会出现悬空属主。
   require_household(household_id);
   HouseholdMember member;
@@ -35,11 +36,13 @@ HouseholdMember MemberService::create(std::int64_t household_id,
 }
 
 std::vector<HouseholdMember> MemberService::list(std::int64_t household_id) {
+  std::scoped_lock lock(database_.mutex());
   require_household(household_id);
   return members_.list_by_household(household_id);
 }
 
 HouseholdMember MemberService::get(std::int64_t id) {
+  std::scoped_lock lock(database_.mutex());
   const auto member = members_.find_by_id(id);
   if (!member.has_value()) {
     throw not_found("member not found");
@@ -49,6 +52,7 @@ HouseholdMember MemberService::get(std::int64_t id) {
 
 HouseholdMember MemberService::update(std::int64_t id, const std::string& name,
                                       MemberRole role, MemberStatus status) {
+  std::scoped_lock lock(database_.mutex());
   // 取出原成员（不存在抛 not_found）后覆盖可变字段；不涉及 household_id，
   // 成员不能在家庭之间迁移。
   HouseholdMember member = get(id);
