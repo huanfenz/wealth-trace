@@ -102,7 +102,25 @@ pip3 install --user -U meson
 
 ---
 
-## 4. 后端构建与运行
+## 4. 一键构建与运行
+
+在项目根目录执行：
+
+```bash
+# 开发：构建后端，启动后端 :8080 和 Vite :5173（支持热更新）
+bash scripts/run.sh dev
+
+# 生产：构建前后端；后端在 :8080 托管 frontend/dist
+bash scripts/run.sh prod
+```
+
+也可以在模式后传入自定义配置文件：`bash scripts/run.sh prod /path/to/config.json`。
+首次运行时，脚本会在缺少 `frontend/node_modules` 的情况下自动安装前端依赖。开发模式访问 `http://127.0.0.1:5173`；生产模式访问 `http://127.0.0.1:8080`。按 `Ctrl-C` 停止服务。
+启动前脚本会自动检测并停止仍占用后端/Vite 端口的旧进程，避免新服务因端口被占而启动失败。
+
+---
+
+## 5. 后端构建与运行
 
 ```bash
 # 1. 配置
@@ -139,23 +157,7 @@ meson compile -C build
 
 ---
 
-## 5. 前端启动
-
-### 一键构建与运行
-
-在项目根目录执行：
-
-```bash
-# 开发：构建后端，启动后端 :8080 和 Vite :5173（支持热更新）
-bash scripts/run.sh dev
-
-# 生产：构建前后端；后端在 :8080 托管 frontend/dist
-bash scripts/run.sh prod
-```
-
-也可以在模式后传入自定义配置文件：`bash scripts/run.sh prod /path/to/config.json`。
-首次运行时，脚本会在缺少 `frontend/node_modules` 的情况下自动安装前端依赖。开发模式访问 `http://127.0.0.1:5173`；生产模式访问 `http://127.0.0.1:8080`。按 `Ctrl-C` 停止服务。
-启动前脚本会自动检测并停止仍占用后端/Vite 端口的旧进程，避免新服务因端口被占而启动失败。
+## 6. 前端启动
 
 开发模式（Vite dev server，自动把 `/api` 代理到 `127.0.0.1:8080`）：
 
@@ -178,7 +180,7 @@ npm run build        # 生成 frontend/dist
 
 ---
 
-## 6. 测试
+## 7. 测试
 
 ```bash
 meson test -C build
@@ -207,7 +209,7 @@ bash scripts/static_smoke.sh     # 验证后端静态托管前端
 
 ---
 
-## 7. 配置说明（config.json）
+## 8. 配置说明（config.json）
 
 | 字段 | 说明 | 默认 |
 | --- | --- | --- |
@@ -234,7 +236,7 @@ WEALTH_TRACE_CONFIG=/path/to/config.json ./build/backend/wealth-trace
 
 ---
 
-## 8. 金额 / 利率 / 时间约定
+## 9. 金额 / 利率 / 时间约定
 
 全项目统一，不允许混用：
 
@@ -251,7 +253,7 @@ WEALTH_TRACE_CONFIG=/path/to/config.json ./build/backend/wealth-trace
 
 ---
 
-## 9. API 简介
+## 10. API 简介
 
 统一响应结构：
 
@@ -295,7 +297,7 @@ WEALTH_TRACE_CONFIG=/path/to/config.json ./build/backend/wealth-trace
 
 ---
 
-## 10. 设计文档与实现说明
+## 11. 设计文档与实现说明
 
 - 需求与总体设计：[`家庭资产管理系统-需求分析与总体设计-V1.md`](./家庭资产管理系统-需求分析与总体设计-V1.md)
 - 实现中发现的设计问题与处理：[`docs/设计问题说明.md`](./docs/设计问题说明.md)
