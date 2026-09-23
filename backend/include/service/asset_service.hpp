@@ -26,6 +26,7 @@ struct AssetCreateInput {
   std::optional<TermDepositDetail> term_deposit;
   std::optional<FundDetail> fund;
   std::optional<BondDetail> bond;
+  std::optional<BondFundDetail> bond_fund;
   std::optional<InsuranceDetail> insurance;
 };
 
@@ -35,6 +36,7 @@ struct AssetBundle {
   std::optional<TermDepositDetail> term_deposit;
   std::optional<FundDetail> fund;
   std::optional<BondDetail> bond;
+  std::optional<BondFundDetail> bond_fund;
   std::optional<InsuranceDetail> insurance;
 };
 
@@ -79,7 +81,12 @@ class AssetService {
   AssetBundle update_detail(std::int64_t id, AssetType detail_type,
                             const TermDepositDetail* term_deposit,
                             const FundDetail* fund, const BondDetail* bond,
+                            const BondFundDetail* bond_fund,
                             const InsuranceDetail* insurance);
+
+  // 删除资产：资产不存在抛 not_found。资产下的全部流水与明细块会被级联删除，
+  // 属不可恢复操作，调用方需二次确认。整个删除在同一事务内完成。
+  void remove(std::int64_t id);
 
  private:
   // 按 asset_type 读取对应明细表，组装成 AssetBundle。

@@ -38,7 +38,6 @@ std::optional<TermDepositDetail> parse_term_deposit(const nlohmann::json& body) 
     throw invalid_request("term_deposit must be an object");
   }
   TermDepositDetail detail;
-  detail.principal = dto::optional_int64(object, "principal").value_or(0);
   detail.annual_interest_rate =
       dto::optional_int64(object, "annual_interest_rate").value_or(0);
   detail.start_date = parse_date_field(object, "start_date", 10);
@@ -68,7 +67,6 @@ std::optional<FundDetail> parse_fund(const nlohmann::json& body) {
   }
   FundDetail detail;
   detail.fund_code = dto::optional_string(object, "fund_code", 32);
-  detail.fund_name = dto::optional_string(object, "fund_name", 100);
   detail.fund_type = dto::optional_string(object, "fund_type", 32);
   detail.lock_start_date = parse_date_field(object, "lock_start_date", 10);
   detail.lock_end_date = parse_date_field(object, "lock_end_date", 10);
@@ -86,13 +84,41 @@ std::optional<BondDetail> parse_bond(const nlohmann::json& body) {
   }
   BondDetail detail;
   detail.bond_code = dto::optional_string(object, "bond_code", 32);
-  detail.bond_name = dto::optional_string(object, "bond_name", 100);
-  detail.principal = dto::optional_int64(object, "principal").value_or(0);
   detail.annual_coupon_rate =
       dto::optional_int64(object, "annual_coupon_rate").value_or(0);
   detail.purchase_date = parse_date_field(object, "purchase_date", 10);
   detail.maturity_date = parse_date_field(object, "maturity_date", 10);
   detail.lock_end_date = parse_date_field(object, "lock_end_date", 10);
+  return detail;
+}
+
+// 解析债券基金明细块：缺省 / null 返回 nullopt；存在则必须是对象。
+// purchase_date / holding_mode / holding_period_days 必填，其余选填；
+// first_redeem_date / next_redeem_date 允许用户手工修正，缺省时由服务层计算。
+std::optional<BondFundDetail> parse_bond_fund(const nlohmann::json& body) {
+  if (!body.contains("bond_fund") || body.at("bond_fund").is_null()) {
+    return std::nullopt;
+  }
+  const auto& object = body.at("bond_fund");
+  if (!object.is_object()) {
+    throw invalid_request("bond_fund must be an object");
+  }
+  BondFundDetail detail;
+  detail.fund_code = dto::optional_string(object, "fund_code", 32);
+  detail.expected_annual_yield_rate =
+      dto::optional_int64(object, "expected_annual_yield_rate");
+  detail.purchase_date =
+      time_util::require_date(dto::require_string(object, "purchase_date", 10), "purchase_date");
+  const auto mode = dto::require_string(object, "holding_mode", 16);
+  const auto parsed_mode = parse_holding_mode(mode);
+  if (!parsed_mode.has_value()) {
+    throw invalid_request("holding_mode must be MIN_HOLDING or ROLLING");
+  }
+  detail.holding_mode = *parsed_mode;
+  detail.holding_period_days = dto::require_int64(object, "holding_period_days");
+  detail.first_redeem_date = parse_date_field(object, "first_redeem_date", 10);
+  detail.next_redeem_date = parse_date_field(object, "next_redeem_date", 10);
+  detail.maturity_date = parse_date_field(object, "maturity_date", 10);
   return detail;
 }
 
@@ -163,6 +189,7 @@ void AssetController::register_routes(crow::SimpleApp& app) {
           input.term_deposit = parse_term_deposit(body);
           input.fund = parse_fund(body);
           input.bond = parse_bond(body);
+          input.bond_fund = parse_bond_fund(body);
           input.insurance = parse_insurance(body);
           return dto::to_json(service_.create(id, input));
         });
@@ -216,13 +243,24 @@ void AssetController::register_routes(crow::SimpleApp& app) {
           const auto term_deposit = parse_term_deposit(body);
           const auto fund = parse_fund(body);
           const auto bond = parse_bond(body);
+          const auto bond_fund = parse_bond_fund(body);
           const auto insurance = parse_insurance(body);
           return dto::to_json(service_.update_detail(
               id, *type, term_deposit ? &*term_deposit : nullptr,
               fund ? &*fund : nullptr, bond ? &*bond : nullptr,
+              bond_fund ? &*bond_fund : nullptr,
               insurance ? &*insurance : nullptr));
         });
       });
+
+  // DELETE /api/assets/<int>：删除资产；资产不存在抛 404，成功返回 null。
+  // 注意：其名下全部流水与明细块会被级联删除，属不可恢复操作。
+  CROW_ROUTE(app, "/api/assets/<int>").methods("DELETE"_method)([this](int id) {
+    return http::handle([this, id] {
+      service_.remove(id);
+      return nlohmann::json(nullptr);
+    });
+  });
 }
 
 }  // namespace wt

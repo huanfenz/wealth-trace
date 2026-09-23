@@ -3,6 +3,7 @@ import type {
   AccountType,
   AssetStatus,
   AssetType,
+  HoldingMode,
   MemberRole,
   MemberStatus,
   TermUnit,
@@ -26,9 +27,16 @@ export const assetTypeLabels: Record<AssetType, string> = {
   TERM_DEPOSIT: '定期存款',
   FUND: '基金',
   BOND: '债券',
+  BOND_FUND: '债券基金',
   INSURANCE: '保险',
   LIABILITY: '负债',
   OTHER: '其他',
+}
+
+/** 债券基金持有方式中文名。 */
+export const holdingModeLabels: Record<HoldingMode, string> = {
+  MIN_HOLDING: '持有期',
+  ROLLING: '滚动持有',
 }
 
 /** 资产状态中文名。 */

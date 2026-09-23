@@ -4,6 +4,7 @@
 
 #include <cstdint>
 #include <optional>
+#include <string>
 #include <vector>
 
 #include "model/entities.hpp"
@@ -34,6 +35,8 @@ class AssetRepository {
                       const std::string& updated_at);
   // 单独更新资产状态（ACTIVE/...）与 updated_at。
   bool update_status(std::int64_t id, AssetStatus status, const std::string& updated_at);
+  // 按 id 删除资产；明细与名下流水由外键 ON DELETE CASCADE 一并删除。
+  bool remove(std::int64_t id);
   // 判断主键是否存在。
   bool exists(std::int64_t id);
   // 统计某账户下的资产数量。
@@ -46,6 +49,11 @@ class AssetRepository {
   void upsert_term_deposit_detail(const TermDepositDetail& detail);
   std::optional<TermDepositDetail> find_term_deposit_detail(std::int64_t asset_id);
   void delete_term_deposit_detail(std::int64_t asset_id);
+  // 每日维护：列出 ACTIVE 且开启自动续存的定期存款。
+  std::vector<TermDepositDetail> list_auto_rollover_term_deposits();
+  // 写回自动续存后的本期起止日期（start_date 同步推进为当前存期起始日）。
+  bool update_term_deposit_period(std::int64_t asset_id, const std::string& start_date,
+                                  const std::string& maturity_date);
 
   void upsert_fund_detail(const FundDetail& detail);
   std::optional<FundDetail> find_fund_detail(std::int64_t asset_id);
@@ -54,6 +62,15 @@ class AssetRepository {
   void upsert_bond_detail(const BondDetail& detail);
   std::optional<BondDetail> find_bond_detail(std::int64_t asset_id);
   void delete_bond_detail(std::int64_t asset_id);
+
+  void upsert_bond_fund_detail(const BondFundDetail& detail);
+  std::optional<BondFundDetail> find_bond_fund_detail(std::int64_t asset_id);
+  void delete_bond_fund_detail(std::int64_t asset_id);
+  // 每日维护：列出所有滚动持有（ROLLING）债基，供推进 next_redeem_date。
+  std::vector<BondFundDetail> list_rolling_bond_funds();
+  // 写回某债基推进后的 next_redeem_date，返回值指示是否确有行被更新。
+  bool update_bond_fund_next_redeem_date(std::int64_t asset_id,
+                                         const std::string& next_redeem_date);
 
   void upsert_insurance_detail(const InsuranceDetail& detail);
   std::optional<InsuranceDetail> find_insurance_detail(std::int64_t asset_id);

@@ -29,6 +29,21 @@ std::optional<std::string> clean_optional(const std::optional<std::string>& valu
   return cleaned;
 }
 
+// 现金/支付宝/微信账户没有外部机构，缺省时用类型中文名兜底，
+// 避免列表「机构」列空着难看。
+std::optional<std::string> default_institution(AccountType type) {
+  switch (type) {
+    case AccountType::Alipay:
+      return std::string("支付宝");
+    case AccountType::Wechat:
+      return std::string("微信");
+    case AccountType::Cash:
+      return std::string("现金");
+    default:
+      return std::nullopt;
+  }
+}
+
 }  // namespace
 
 void AccountService::require_household(std::int64_t household_id) {
@@ -64,6 +79,9 @@ Account AccountService::create(std::int64_t household_id, std::int64_t owner_mem
   account.name = strings::require_text(name, "name", 100);
   account.type = type;
   account.institution_name = clean_optional(institution_name, "institution_name", 100);
+  if (!account.institution_name.has_value()) {
+    account.institution_name = default_institution(type);
+  }
   account.account_no_masked =
       clean_optional(account_no_masked, "account_no_masked", 64);
   account.remark = clean_optional(remark, "remark", 500);
@@ -138,6 +156,9 @@ Account AccountService::update(std::int64_t id, std::int64_t owner_member_id,
   account.name = strings::require_text(name, "name", 100);
   account.type = type;
   account.institution_name = clean_optional(institution_name, "institution_name", 100);
+  if (!account.institution_name.has_value()) {
+    account.institution_name = default_institution(type);
+  }
   account.account_no_masked =
       clean_optional(account_no_masked, "account_no_masked", 64);
   account.remark = clean_optional(remark, "remark", 500);
@@ -145,6 +166,15 @@ Account AccountService::update(std::int64_t id, std::int64_t owner_member_id,
   account.updated_at = time_util::now_iso8601();
   accounts_.update(account);
   return account;
+}
+
+void AccountService::remove(std::int64_t id) {
+  std::scoped_lock lock(database_.mutex());
+  get(id);  // 不存在则抛 not_found
+  if (assets_.count_by_account(id) > 0) {
+    throw conflict("cannot delete account while it still has assets");
+  }
+  accounts_.remove(id);
 }
 
 }  // namespace wt

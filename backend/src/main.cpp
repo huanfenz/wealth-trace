@@ -1,9 +1,11 @@
 // 后端入口：加载配置 -> 打开数据库 -> 执行 migration -> 创建默认家庭 ->
 // 注册 API 路由与 CORS 预检 -> 注册静态托管 -> 启动 Crow 服务。
+#include <chrono>
 #include <cstdlib>
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <thread>
 
 #include "crow.h"
 
@@ -21,7 +23,9 @@
 #include "controller/transaction_controller.hpp"
 #include "database/database.hpp"
 #include "database/migration.hpp"
+#include "service/daily_maintenance_service.hpp"
 #include "service/household_service.hpp"
+#include "utils/time_util.hpp"
 
 namespace {
 
@@ -51,8 +55,12 @@ int main(int argc, char** argv) {
     return 1;
   }
   config.apply_log_level();
+  // 统一业务时区（默认 Asia/Shanghai）：业务日期相关判断全部以它为准，
+  // 必须在创建线程、处理请求之前设置。审计时间戳仍为 UTC。
+  time_util::set_business_timezone(config.business_timezone);
 
-  log_info("财迹 wealth-trace backend starting");
+  log_info("财迹 wealth-trace backend starting (business timezone: " +
+           time_util::business_timezone() + ")");
 
   // 2. 打开数据库、执行 migration 并确保存在一个默认家庭。
   Database database;
@@ -71,6 +79,17 @@ int main(int argc, char** argv) {
   } catch (const std::exception& error) {
     log_critical(std::string("database initialisation failed: ") + error.what());
     return 1;
+  }
+
+  // 2.1 每日维护补跑：程序不保证每天 0 点在运行，启动时检查当天是否已执行，
+  //     未执行则立即补跑一次。失败不阻断启动，仅记录错误，下次调度可重试。
+  try {
+    DailyAssetMaintenanceService maintenance(database);
+    if (maintenance.run_if_due()) {
+      log_info("daily maintenance catch-up executed on startup");
+    }
+  } catch (const std::exception& error) {
+    log_error(std::string("daily maintenance catch-up failed: ") + error.what());
   }
 
   // 3. 创建 Crow 应用并注册路由。
@@ -116,6 +135,22 @@ int main(int argc, char** argv) {
 
   // 4. 绑定地址端口，设置线程数并启动服务（阻塞运行）。
   app.bindaddr(config.server.host).port(static_cast<std::uint16_t>(config.server.port));
+
+  // 4.1 每日维护调度：后台线程等到下一个「业务时区 0 点」执行一次，循环往复。
+  //     只做「收敛到今天应有的状态」，不逐日回放；run_if_due 保证幂等与去重。
+  std::thread maintenance_scheduler([&database] {
+    while (true) {
+      const auto wait = std::chrono::seconds(time_util::seconds_until_next_business_midnight());
+      std::this_thread::sleep_for(wait);
+      try {
+        DailyAssetMaintenanceService maintenance(database);
+        maintenance.run_if_due();
+      } catch (const std::exception& error) {
+        log_error(std::string("daily maintenance failed: ") + error.what());
+      }
+    }
+  });
+  maintenance_scheduler.detach();
 
   log_info("listening on http://" + config.server.host + ":" +
            std::to_string(config.server.port));

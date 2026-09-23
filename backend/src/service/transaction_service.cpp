@@ -250,4 +250,36 @@ Transaction TransactionService::get(std::int64_t id) {
   return *transaction;
 }
 
+std::int64_t TransactionService::remove(std::int64_t id) {
+  std::scoped_lock lock(database_.mutex());
+  const auto target = transactions_.find_by_id(id);
+  if (!target.has_value()) {
+    throw not_found("transaction not found");
+  }
+
+  // 转账是一对共用 transfer_group_id 的流水：删除其中一条时必须成对删除，
+  // 否则会剩下一条「无对手方」的流水，且两端余额不再守恒。
+  std::vector<Transaction> to_delete;
+  if (target->transfer_group_id.has_value()) {
+    to_delete = transactions_.list_by_transfer_group(*target->transfer_group_id);
+  } else {
+    to_delete.push_back(*target);
+  }
+
+  const std::string now = time_util::now_iso8601();
+  // 逐条回滚余额并删除流水，全部放在一个事务里：要么都成功，要么都回滚。
+  TransactionGuard guard(database_);
+  for (const auto& transaction : to_delete) {
+    const auto asset = assets_.find_by_id(transaction.asset_id);
+    if (asset.has_value()) {
+      // 反向操作：原交易使余额变化了 delta，删除即抵消该 delta。
+      const std::int64_t delta = transaction_delta(transaction.type, transaction.amount);
+      assets_.update_balance(asset->id, asset->current_balance - delta, now);
+    }
+    transactions_.remove(transaction.id);
+  }
+  guard.commit();
+  return static_cast<std::int64_t>(to_delete.size());
+}
+
 }  // namespace wt

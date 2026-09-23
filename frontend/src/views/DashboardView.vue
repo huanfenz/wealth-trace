@@ -1,4 +1,4 @@
-<!-- 家庭总览页：展示净资产/资产负债/本月收支等指标，以及按成员、类型、账户的汇总表。 -->
+<!-- 家庭总览页：展示净资产/资产负债/本月收支等指标，并以图表与表格汇总资产与收支。 -->
 <template>
   <div>
     <el-row :gutter="16">
@@ -46,6 +46,46 @@
     <el-row :gutter="16" class="row">
       <el-col :span="12">
         <el-card shadow="never">
+          <BaseChart v-if="hasAccounts" :option="accountPieChart" height="300px" />
+          <el-empty v-else description="暂无账户数据" />
+        </el-card>
+      </el-col>
+      <el-col :span="12">
+        <el-card shadow="never">
+          <BaseChart v-if="hasAssetTypes" :option="assetTypeOption" height="300px" />
+          <el-empty v-else description="暂无资产数据" />
+        </el-card>
+      </el-col>
+    </el-row>
+
+    <el-card shadow="never" class="row">
+      <BaseChart v-if="monthly.length" :option="monthlyOption" height="320px" />
+      <el-empty v-else description="暂无收支数据" />
+    </el-card>
+
+    <el-row :gutter="16" class="row">
+      <el-col :span="12">
+        <el-card shadow="never">
+          <BaseChart v-if="hasAccounts" :option="accountOption" height="320px" />
+          <el-empty v-else description="暂无账户数据" />
+        </el-card>
+      </el-col>
+      <el-col :span="12">
+        <el-card shadow="never">
+          <template #header><span>按账户</span></template>
+          <el-table :data="overview?.by_account ?? []" size="small" max-height="320">
+            <el-table-column prop="name" label="账户" />
+            <el-table-column label="余额" align="right">
+              <template #default="{ row }"><AmountText :value="row.amount" /></template>
+            </el-table-column>
+          </el-table>
+        </el-card>
+      </el-col>
+    </el-row>
+
+    <el-row :gutter="16" class="row">
+      <el-col :span="12">
+        <el-card shadow="never">
           <template #header><span>按成员</span></template>
           <el-table :data="overview?.by_member ?? []" size="small">
             <el-table-column prop="name" label="成员" />
@@ -69,40 +109,52 @@
         </el-card>
       </el-col>
     </el-row>
-
-    <el-card shadow="never" class="row">
-      <template #header><span>按账户</span></template>
-      <el-table :data="overview?.by_account ?? []" size="small">
-        <el-table-column prop="name" label="账户" />
-        <el-table-column label="余额" align="right">
-          <template #default="{ row }"><AmountText :value="row.amount" /></template>
-        </el-table-column>
-      </el-table>
-    </el-card>
   </div>
 </template>
 
 <script setup lang="ts">
-// 职责：进入页面时按当前家庭拉取总览统计并渲染；无交互表单，仅读取展示。
-import { onMounted, ref } from 'vue'
+// 职责：进入页面时并行拉取总览与近 6 个月趋势，渲染指标卡、饼图/柱状图/折线图与汇总表。
+import { computed, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 
 import AmountText from '@/components/AmountText.vue'
-import { getOverview } from '@/api'
+import BaseChart from '@/components/BaseChart.vue'
+import { getMonthlyStats, getOverview } from '@/api'
 import { useAppStore } from '@/stores/app'
 import { assetTypeLabels } from '@/utils/labels'
-import type { AssetType, HouseholdOverview } from '@/types'
+import {
+  accountBarOption,
+  accountPieOption,
+  assetTypePieOption,
+  monthlyTrendOption,
+} from '@/utils/charts'
+import type { AssetType, HouseholdOverview, MonthlyStat } from '@/types'
 
 const store = useAppStore()
 const overview = ref<HouseholdOverview | null>(null)
+const monthly = ref<MonthlyStat[]>([]) // 近 6 个月收支趋势
 
-// 拉取家庭总览数据；不传 year/month 时后端默认取当前月。
+// 图表 option：数据为空时对应卡片改用 el-empty 展示。
+const assetTypeOption = computed(() => assetTypePieOption(overview.value?.by_type ?? []))
+const accountPieChart = computed(() => accountPieOption(overview.value?.by_account ?? []))
+const accountOption = computed(() => accountBarOption(overview.value?.by_account ?? []))
+const monthlyOption = computed(() => monthlyTrendOption(monthly.value, '近 6 个月收支趋势'))
+
+const hasAssetTypes = computed(() => (overview.value?.by_type.length ?? 0) > 0)
+const hasAccounts = computed(() => (overview.value?.by_account.length ?? 0) > 0)
+
+// 并行拉取总览与趋势数据；总览不传 year/month 时后端默认取当前月。
 async function load() {
   if (!store.householdId) {
     return
   }
   try {
-    overview.value = await getOverview(store.householdId, {})
+    const [overviewData, monthlyData] = await Promise.all([
+      getOverview(store.householdId, {}),
+      getMonthlyStats(store.householdId, 6),
+    ])
+    overview.value = overviewData
+    monthly.value = monthlyData
   } catch (error) {
     ElMessage.error((error as Error).message)
   }

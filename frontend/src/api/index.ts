@@ -1,5 +1,5 @@
 // 业务 API 集合：按资源（家庭/成员/账户/资产/交易/统计）封装对后端的请求。
-import { get, post, put } from './http'
+import { del, get, post, put } from './http'
 import type {
   Account,
   Asset,
@@ -7,6 +7,7 @@ import type {
   HouseholdOverview,
   Member,
   Meta,
+  MonthlyStat,
   Paged,
   PeriodStatistics,
   Transaction,
@@ -90,6 +91,11 @@ export function updateAccount(
   return put<Account>(`/accounts/${id}`, body)
 }
 
+/** 删除账户；账户下仍有资产时后端返回冲突错误。 */
+export function deleteAccount(id: number): Promise<null> {
+  return del<null>(`/accounts/${id}`)
+}
+
 // --- assets（资产） -------------------------------------------------------
 
 /** 获取资产列表，可按成员或账户筛选。 */
@@ -132,6 +138,11 @@ export function updateAssetDetail(
   body: Record<string, unknown>,
 ): Promise<Asset> {
   return put<Asset>(`/assets/${id}/detail`, body)
+}
+
+/** 删除资产；其名下全部流水与明细块会被级联删除。 */
+export function deleteAsset(id: number): Promise<null> {
+  return del<null>(`/assets/${id}`)
 }
 
 // --- transactions（收支与转账） ------------------------------------------
@@ -198,6 +209,11 @@ export function transfer(
   )
 }
 
+/** 删除流水并回滚资产余额；转账流水会同组删除配对的两条。 */
+export function deleteTransaction(id: number): Promise<{ deleted: number }> {
+  return del<{ deleted: number }>(`/transactions/${id}`)
+}
+
 // --- statistics（统计） ---------------------------------------------------
 
 /** 获取家庭总览统计（净资产、收支、按成员/账户/类型汇总）。 */
@@ -221,4 +237,9 @@ export function getPeriod(
     to: params.to,
     owner_member_id: params.ownerMemberId,
   })
+}
+
+/** 获取近 N 个月收支趋势（按月升序，缺月补零）。 */
+export function getMonthlyStats(householdId: number, months: number): Promise<MonthlyStat[]> {
+  return get<MonthlyStat[]>(`/households/${householdId}/statistics/monthly`, { months })
 }

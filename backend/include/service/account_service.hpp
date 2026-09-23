@@ -63,6 +63,10 @@ class AccountService {
                  const std::optional<std::string>& account_no_masked,
                  const std::optional<std::string>& remark, bool enabled);
 
+  // 删除账户：账户不存在抛 not_found；账户下仍有资产时抛 conflict，
+  // 需先清空（删除或转移）其下资产，避免误删导致资产及其明细级联丢失。
+  void remove(std::int64_t id);
+
  private:
   // 前置校验：家庭必须存在，否则抛 not_found。
   void require_household(std::int64_t household_id);

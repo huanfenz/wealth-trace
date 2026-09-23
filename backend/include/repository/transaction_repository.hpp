@@ -34,6 +34,10 @@ class TransactionRepository {
   std::int64_t create(const Transaction& transaction);
   // 按主键查询，不存在返回 std::nullopt。
   std::optional<Transaction> find_by_id(std::int64_t id);
+  // 按转账分组 id 查询配对流水（通常两条：TRANSFER_OUT + TRANSFER_IN）。
+  std::vector<Transaction> list_by_transfer_group(std::int64_t group_id);
+  // 按主键删除流水；返回是否真正删除了行。
+  bool remove(std::int64_t id);
   // 按条件分页查询，排序为 transaction_time DESC, id DESC。
   std::vector<Transaction> list(const TransactionQuery& query);
   // 按同样条件统计总数（不分页）。

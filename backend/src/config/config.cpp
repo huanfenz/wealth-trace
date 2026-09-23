@@ -112,6 +112,8 @@ Config Config::load(const std::string& path) {
     config.categories.expense =
         json_string_list(categories, "expense", config.categories.expense);
   }
+  config.business_timezone =
+      json_string(root, "business_timezone", config.business_timezone);
 
   // 端口必须是合法 TCP 端口，否则启动即失败。
   if (config.server.port <= 0 || config.server.port > 65535) {

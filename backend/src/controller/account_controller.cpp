@@ -94,6 +94,15 @@ void AccountController::register_routes(crow::SimpleApp& app) {
                                               remark, enabled));
         });
       });
+
+  // DELETE /api/accounts/<int>：删除账户；账户不存在抛 404，账户下仍有资产时
+  // 抛 409（需先清空资产），成功返回 null。
+  CROW_ROUTE(app, "/api/accounts/<int>").methods("DELETE"_method)([this](int id) {
+    return http::handle([this, id] {
+      service_.remove(id);
+      return nlohmann::json(nullptr);
+    });
+  });
 }
 
 }  // namespace wt

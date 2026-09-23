@@ -69,6 +69,12 @@ class TransactionService {
   // 按 id 获取流水；不存在抛 not_found。
   Transaction get(std::int64_t id);
 
+  // 删除流水并回滚其对资产余额的影响（current_balance -= 原 delta）。
+  // 若该流水属于某次转账（transfer_group_id 非空），则连同同组的两条流水
+  // 一起删除，并分别回滚两端资产余额，保证「钱不会凭空增减」。
+  // 流水不存在抛 not_found。返回实际删除的流水条数（转账为 2，否则为 1）。
+  std::int64_t remove(std::int64_t id);
+
  private:
   // 单资产流水的公共实现：校验金额方向，检查资产 ACTIVE，计算 delta 与
   // 新余额，在事务内写流水并更新余额。收入/支出/调整都复用它。

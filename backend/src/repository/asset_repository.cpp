@@ -38,6 +38,29 @@ constexpr const char* kSelectColumns =
     "id, household_id, owner_member_id, account_id, name, asset_type, "
     "opening_balance, current_balance, status, remark, created_at, updated_at";
 
+// term_deposit_detail 的 SELECT 列顺序；与 map_term_deposit 的列下标严格对应。
+constexpr const char* kTermDepositColumns =
+    "asset_id, annual_interest_rate, start_date, maturity_date, "
+    "term_value, term_unit, interest_type, auto_rollover, maturity_action";
+
+// 行映射：0=asset_id 1=annual_interest_rate 2=start_date 3=maturity_date
+// 4=term_value 5=term_unit 6=interest_type 7=auto_rollover 8=maturity_action
+TermDepositDetail map_term_deposit(Statement& statement) {
+  TermDepositDetail detail;
+  detail.asset_id = statement.get_int64(0);
+  detail.annual_interest_rate = statement.get_int64(1);
+  detail.start_date = statement.get_optional_text(2);
+  detail.maturity_date = statement.get_optional_text(3);
+  detail.term_value = statement.get_optional_int64(4);
+  if (const auto unit = statement.get_optional_text(5); unit.has_value()) {
+    detail.term_unit = parse_term_unit(*unit);
+  }
+  detail.interest_type = statement.get_optional_text(6);
+  detail.auto_rollover = statement.get_bool(7);
+  detail.maturity_action = statement.get_optional_text(8);
+  return detail;
+}
+
 }  // namespace
 
 // 插入资产（冗余 household_id/owner_member_id 直接写入），返回自增主键。
@@ -137,6 +160,15 @@ bool AssetRepository::update_status(std::int64_t id, AssetStatus status,
   return database_.changes() > 0;
 }
 
+bool AssetRepository::remove(std::int64_t id) {
+  // 明细表与 "transaction" 的 asset_id 外键均为 ON DELETE CASCADE，
+  // 删除资产行时数据库会自动级联清理其明细与全部流水。
+  Statement statement(database_, "DELETE FROM asset WHERE id = ?;");
+  statement.bind(1, id);
+  statement.run();
+  return database_.changes() > 0;
+}
+
 bool AssetRepository::exists(std::int64_t id) {
   Statement statement(database_, "SELECT COUNT(*) FROM asset WHERE id = ?;");
   statement.bind(1, id);
@@ -176,63 +208,67 @@ std::int64_t AssetRepository::sum_balance_by_account(std::int64_t account_id) {
 void AssetRepository::upsert_term_deposit_detail(const TermDepositDetail& detail) {
   Statement statement(
       database_,
-      "INSERT INTO term_deposit_detail (asset_id, principal, annual_interest_rate, "
+      "INSERT INTO term_deposit_detail (asset_id, annual_interest_rate, "
       "start_date, maturity_date, term_value, term_unit, interest_type, auto_rollover, "
-      "maturity_action) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
-      "ON CONFLICT(asset_id) DO UPDATE SET principal = excluded.principal, "
+      "maturity_action) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) "
+      "ON CONFLICT(asset_id) DO UPDATE SET "
       "annual_interest_rate = excluded.annual_interest_rate, start_date = excluded.start_date, "
       "maturity_date = excluded.maturity_date, term_value = excluded.term_value, "
       "term_unit = excluded.term_unit, interest_type = excluded.interest_type, "
       "auto_rollover = excluded.auto_rollover, maturity_action = excluded.maturity_action;");
   statement.bind(1, detail.asset_id)
-      .bind(2, detail.principal)
-      .bind(3, detail.annual_interest_rate)
-      .bind_optional_text(4, detail.start_date)
-      .bind_optional_text(5, detail.maturity_date)
-      .bind_optional_int64(6, detail.term_value)
-      .bind_optional_text(7, detail.term_unit.has_value()
+      .bind(2, detail.annual_interest_rate)
+      .bind_optional_text(3, detail.start_date)
+      .bind_optional_text(4, detail.maturity_date)
+      .bind_optional_int64(5, detail.term_value)
+      .bind_optional_text(6, detail.term_unit.has_value()
                                  ? std::optional<std::string>(
                                        std::string(to_string(*detail.term_unit)))
                                  : std::nullopt)
-      .bind_optional_text(8, detail.interest_type)
-      .bind(9, detail.auto_rollover)
-      .bind_optional_text(10, detail.maturity_action)
+      .bind_optional_text(7, detail.interest_type)
+      .bind(8, detail.auto_rollover)
+      .bind_optional_text(9, detail.maturity_action)
       .run();
 }
 
 std::optional<TermDepositDetail> AssetRepository::find_term_deposit_detail(
     std::int64_t asset_id) {
-  Statement statement(
-      database_,
-      "SELECT asset_id, principal, annual_interest_rate, start_date, maturity_date, "
-      "term_value, term_unit, interest_type, auto_rollover, maturity_action "
-      "FROM term_deposit_detail WHERE asset_id = ?;");
+  Statement statement(database_, std::string("SELECT ") + kTermDepositColumns +
+                                     " FROM term_deposit_detail WHERE asset_id = ?;");
   statement.bind(1, asset_id);
   if (!statement.step()) {
     return std::nullopt;
   }
-  TermDepositDetail detail;
-  // 列下标：0=asset_id 1=principal 2=annual_interest_rate 3=start_date
-  // 4=maturity_date 5=term_value 6=term_unit 7=interest_type 8=auto_rollover
-  // 9=maturity_action
-  detail.asset_id = statement.get_int64(0);
-  detail.principal = statement.get_int64(1);
-  detail.annual_interest_rate = statement.get_int64(2);
-  detail.start_date = statement.get_optional_text(3);
-  detail.maturity_date = statement.get_optional_text(4);
-  detail.term_value = statement.get_optional_int64(5);
-  if (const auto unit = statement.get_optional_text(6); unit.has_value()) {
-    detail.term_unit = parse_term_unit(*unit);
-  }
-  detail.interest_type = statement.get_optional_text(7);
-  detail.auto_rollover = statement.get_bool(8);
-  detail.maturity_action = statement.get_optional_text(9);
-  return detail;
+  return map_term_deposit(statement);
 }
 
 void AssetRepository::delete_term_deposit_detail(std::int64_t asset_id) {
   Statement statement(database_, "DELETE FROM term_deposit_detail WHERE asset_id = ?;");
   statement.bind(1, asset_id).run();
+}
+
+// 只取 ACTIVE 资产下的自动续存存款；已关闭（CLOSED）资产无需推进。
+std::vector<TermDepositDetail> AssetRepository::list_auto_rollover_term_deposits() {
+  Statement statement(
+      database_,
+      std::string("SELECT ") + kTermDepositColumns +
+          " FROM term_deposit_detail d JOIN asset a ON a.id = d.asset_id "
+          "WHERE d.auto_rollover = 1 AND a.status = 'ACTIVE' ORDER BY d.asset_id ASC;");
+  std::vector<TermDepositDetail> deposits;
+  while (statement.step()) {
+    deposits.push_back(map_term_deposit(statement));
+  }
+  return deposits;
+}
+
+bool AssetRepository::update_term_deposit_period(std::int64_t asset_id,
+                                                 const std::string& start_date,
+                                                 const std::string& maturity_date) {
+  Statement statement(
+      database_,
+      "UPDATE term_deposit_detail SET start_date = ?, maturity_date = ? WHERE asset_id = ?;");
+  statement.bind(1, start_date).bind(2, maturity_date).bind(3, asset_id).run();
+  return database_.changes() > 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -242,37 +278,34 @@ void AssetRepository::delete_term_deposit_detail(std::int64_t asset_id) {
 void AssetRepository::upsert_fund_detail(const FundDetail& detail) {
   Statement statement(
       database_,
-      "INSERT INTO fund_detail (asset_id, fund_code, fund_name, fund_type, "
-      "lock_start_date, lock_end_date) VALUES (?, ?, ?, ?, ?, ?) "
+      "INSERT INTO fund_detail (asset_id, fund_code, fund_type, "
+      "lock_start_date, lock_end_date) VALUES (?, ?, ?, ?, ?) "
       "ON CONFLICT(asset_id) DO UPDATE SET fund_code = excluded.fund_code, "
-      "fund_name = excluded.fund_name, fund_type = excluded.fund_type, "
+      "fund_type = excluded.fund_type, "
       "lock_start_date = excluded.lock_start_date, lock_end_date = excluded.lock_end_date;");
   statement.bind(1, detail.asset_id)
       .bind_optional_text(2, detail.fund_code)
-      .bind_optional_text(3, detail.fund_name)
-      .bind_optional_text(4, detail.fund_type)
-      .bind_optional_text(5, detail.lock_start_date)
-      .bind_optional_text(6, detail.lock_end_date)
+      .bind_optional_text(3, detail.fund_type)
+      .bind_optional_text(4, detail.lock_start_date)
+      .bind_optional_text(5, detail.lock_end_date)
       .run();
 }
 
 std::optional<FundDetail> AssetRepository::find_fund_detail(std::int64_t asset_id) {
   Statement statement(database_,
-                      "SELECT asset_id, fund_code, fund_name, fund_type, lock_start_date, "
+                      "SELECT asset_id, fund_code, fund_type, lock_start_date, "
                       "lock_end_date FROM fund_detail WHERE asset_id = ?;");
   statement.bind(1, asset_id);
   if (!statement.step()) {
     return std::nullopt;
   }
   FundDetail detail;
-  // 列下标：0=asset_id 1=fund_code 2=fund_name 3=fund_type
-  // 4=lock_start_date 5=lock_end_date
+  // 列下标：0=asset_id 1=fund_code 2=fund_type 3=lock_start_date 4=lock_end_date
   detail.asset_id = statement.get_int64(0);
   detail.fund_code = statement.get_optional_text(1);
-  detail.fund_name = statement.get_optional_text(2);
-  detail.fund_type = statement.get_optional_text(3);
-  detail.lock_start_date = statement.get_optional_text(4);
-  detail.lock_end_date = statement.get_optional_text(5);
+  detail.fund_type = statement.get_optional_text(2);
+  detail.lock_start_date = statement.get_optional_text(3);
+  detail.lock_end_date = statement.get_optional_text(4);
   return detail;
 }
 
@@ -288,27 +321,24 @@ void AssetRepository::delete_fund_detail(std::int64_t asset_id) {
 void AssetRepository::upsert_bond_detail(const BondDetail& detail) {
   Statement statement(
       database_,
-      "INSERT INTO bond_detail (asset_id, bond_code, bond_name, principal, "
+      "INSERT INTO bond_detail (asset_id, bond_code, "
       "annual_coupon_rate, purchase_date, maturity_date, lock_end_date) "
-      "VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
+      "VALUES (?, ?, ?, ?, ?, ?) "
       "ON CONFLICT(asset_id) DO UPDATE SET bond_code = excluded.bond_code, "
-      "bond_name = excluded.bond_name, principal = excluded.principal, "
       "annual_coupon_rate = excluded.annual_coupon_rate, purchase_date = excluded.purchase_date, "
       "maturity_date = excluded.maturity_date, lock_end_date = excluded.lock_end_date;");
   statement.bind(1, detail.asset_id)
       .bind_optional_text(2, detail.bond_code)
-      .bind_optional_text(3, detail.bond_name)
-      .bind(4, detail.principal)
-      .bind(5, detail.annual_coupon_rate)
-      .bind_optional_text(6, detail.purchase_date)
-      .bind_optional_text(7, detail.maturity_date)
-      .bind_optional_text(8, detail.lock_end_date)
+      .bind(3, detail.annual_coupon_rate)
+      .bind_optional_text(4, detail.purchase_date)
+      .bind_optional_text(5, detail.maturity_date)
+      .bind_optional_text(6, detail.lock_end_date)
       .run();
 }
 
 std::optional<BondDetail> AssetRepository::find_bond_detail(std::int64_t asset_id) {
   Statement statement(database_,
-                      "SELECT asset_id, bond_code, bond_name, principal, annual_coupon_rate, "
+                      "SELECT asset_id, bond_code, annual_coupon_rate, "
                       "purchase_date, maturity_date, lock_end_date FROM bond_detail "
                       "WHERE asset_id = ?;");
   statement.bind(1, asset_id);
@@ -316,22 +346,112 @@ std::optional<BondDetail> AssetRepository::find_bond_detail(std::int64_t asset_i
     return std::nullopt;
   }
   BondDetail detail;
-  // 列下标：0=asset_id 1=bond_code 2=bond_name 3=principal 4=annual_coupon_rate
-  // 5=purchase_date 6=maturity_date 7=lock_end_date
+  // 列下标：0=asset_id 1=bond_code 2=annual_coupon_rate
+  // 3=purchase_date 4=maturity_date 5=lock_end_date
   detail.asset_id = statement.get_int64(0);
   detail.bond_code = statement.get_optional_text(1);
-  detail.bond_name = statement.get_optional_text(2);
-  detail.principal = statement.get_int64(3);
-  detail.annual_coupon_rate = statement.get_int64(4);
-  detail.purchase_date = statement.get_optional_text(5);
-  detail.maturity_date = statement.get_optional_text(6);
-  detail.lock_end_date = statement.get_optional_text(7);
+  detail.annual_coupon_rate = statement.get_int64(2);
+  detail.purchase_date = statement.get_optional_text(3);
+  detail.maturity_date = statement.get_optional_text(4);
+  detail.lock_end_date = statement.get_optional_text(5);
   return detail;
 }
 
 void AssetRepository::delete_bond_detail(std::int64_t asset_id) {
   Statement statement(database_, "DELETE FROM bond_detail WHERE asset_id = ?;");
   statement.bind(1, asset_id).run();
+}
+
+// ---------------------------------------------------------------------------
+// bond_fund_detail
+// ---------------------------------------------------------------------------
+namespace {
+
+// bond_fund_detail 的 SELECT 列顺序；与 map_bond_fund 的列下标严格对应。
+constexpr const char* kBondFundSelectColumns =
+    "asset_id, fund_code, expected_annual_yield_rate, "
+    "purchase_date, holding_mode, holding_period_days, first_redeem_date, "
+    "next_redeem_date, maturity_date";
+
+// 行映射：0=asset_id 1=fund_code 2=expected_annual_yield_rate 3=purchase_date
+// 4=holding_mode 5=holding_period_days 6=first_redeem_date 7=next_redeem_date
+// 8=maturity_date
+BondFundDetail map_bond_fund(Statement& statement) {
+  BondFundDetail detail;
+  detail.asset_id = statement.get_int64(0);
+  detail.fund_code = statement.get_optional_text(1);
+  detail.expected_annual_yield_rate = statement.get_optional_int64(2);
+  detail.purchase_date = statement.get_text(3);
+  detail.holding_mode =
+      parse_holding_mode(statement.get_text(4)).value_or(HoldingMode::MinHolding);
+  detail.holding_period_days = statement.get_int64(5);
+  detail.first_redeem_date = statement.get_optional_text(6);
+  detail.next_redeem_date = statement.get_optional_text(7);
+  detail.maturity_date = statement.get_optional_text(8);
+  return detail;
+}
+
+}  // namespace
+
+// upsert 语义同其它明细表：ON CONFLICT(asset_id) DO UPDATE 整行覆盖。
+void AssetRepository::upsert_bond_fund_detail(const BondFundDetail& detail) {
+  Statement statement(
+      database_,
+      "INSERT INTO bond_fund_detail (asset_id, fund_code, "
+      "expected_annual_yield_rate, purchase_date, holding_mode, holding_period_days, "
+      "first_redeem_date, next_redeem_date, maturity_date) "
+      "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) "
+      "ON CONFLICT(asset_id) DO UPDATE SET fund_code = excluded.fund_code, "
+      "expected_annual_yield_rate = excluded.expected_annual_yield_rate, "
+      "purchase_date = excluded.purchase_date, holding_mode = excluded.holding_mode, "
+      "holding_period_days = excluded.holding_period_days, "
+      "first_redeem_date = excluded.first_redeem_date, "
+      "next_redeem_date = excluded.next_redeem_date, maturity_date = excluded.maturity_date;");
+  statement.bind(1, detail.asset_id)
+      .bind_optional_text(2, detail.fund_code)
+      .bind_optional_int64(3, detail.expected_annual_yield_rate)
+      .bind(4, detail.purchase_date)
+      .bind(5, std::string(to_string(detail.holding_mode)))
+      .bind(6, detail.holding_period_days)
+      .bind_optional_text(7, detail.first_redeem_date)
+      .bind_optional_text(8, detail.next_redeem_date)
+      .bind_optional_text(9, detail.maturity_date)
+      .run();
+}
+
+std::optional<BondFundDetail> AssetRepository::find_bond_fund_detail(std::int64_t asset_id) {
+  Statement statement(database_, std::string("SELECT ") + kBondFundSelectColumns +
+                                     " FROM bond_fund_detail WHERE asset_id = ?;");
+  statement.bind(1, asset_id);
+  if (!statement.step()) {
+    return std::nullopt;
+  }
+  return map_bond_fund(statement);
+}
+
+void AssetRepository::delete_bond_fund_detail(std::int64_t asset_id) {
+  Statement statement(database_, "DELETE FROM bond_fund_detail WHERE asset_id = ?;");
+  statement.bind(1, asset_id).run();
+}
+
+std::vector<BondFundDetail> AssetRepository::list_rolling_bond_funds() {
+  Statement statement(database_, std::string("SELECT ") + kBondFundSelectColumns +
+                                     " FROM bond_fund_detail WHERE holding_mode = 'ROLLING' "
+                                     "ORDER BY asset_id ASC;");
+  std::vector<BondFundDetail> funds;
+  while (statement.step()) {
+    funds.push_back(map_bond_fund(statement));
+  }
+  return funds;
+}
+
+bool AssetRepository::update_bond_fund_next_redeem_date(std::int64_t asset_id,
+                                                        const std::string& next_redeem_date) {
+  Statement statement(
+      database_,
+      "UPDATE bond_fund_detail SET next_redeem_date = ? WHERE asset_id = ?;");
+  statement.bind(1, next_redeem_date).bind(2, asset_id).run();
+  return database_.changes() > 0;
 }
 
 // ---------------------------------------------------------------------------

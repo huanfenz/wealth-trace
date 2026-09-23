@@ -31,6 +31,8 @@ nlohmann::json to_json(const TermDepositDetail& detail);
 nlohmann::json to_json(const FundDetail& detail);
 // 债券明细（利率为定点整数）。
 nlohmann::json to_json(const BondDetail& detail);
+// 债券基金明细（持有方式、赎回日期；收益率为定点整数）。
+nlohmann::json to_json(const BondFundDetail& detail);
 // 保险明细（金额单位均为分）。
 nlohmann::json to_json(const InsuranceDetail& detail);
 // 资产聚合包：资产基础信息 + 四个明细块（不适用的明细块为 null）。
@@ -46,6 +48,8 @@ nlohmann::json to_json(const NamedAmount& amount);
 nlohmann::json to_json(const TypeAmount& amount);
 // 按分类聚合的金额（金额为分）。
 nlohmann::json to_json(const CategoryAmount& amount);
+// 单月收支：month（YYYY-MM）、收入 / 支出 / 结余（分）。
+nlohmann::json to_json(const MonthlyIncomeExpense& amount);
 // 家庭总览：资产 / 负债 / 净资产 / 当月收支及多维聚合。
 nlohmann::json to_json(const HouseholdOverview& overview);
 // 区间统计：收支合计、按成员与按分类的聚合。

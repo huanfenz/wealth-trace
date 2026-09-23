@@ -10,6 +10,7 @@
 #include "database/database.hpp"
 #include "database/transaction.hpp"
 #include "utils/strings.hpp"
+#include "utils/term_date.hpp"
 #include "utils/time_util.hpp"
 
 namespace wt {
@@ -45,6 +46,7 @@ AssetType detail_type_of(const AssetCreateInput& input) {
   if (input.term_deposit.has_value()) return AssetType::TermDeposit;
   if (input.fund.has_value()) return AssetType::Fund;
   if (input.bond.has_value()) return AssetType::Bond;
+  if (input.bond_fund.has_value()) return AssetType::BondFund;
   if (input.insurance.has_value()) return AssetType::Insurance;
   return input.asset_type;
 }
@@ -52,7 +54,64 @@ AssetType detail_type_of(const AssetCreateInput& input) {
 // 统计入参里提供了几个明细块（用于「一次只能提供一个」的约束）。
 int count_provided_details(const AssetCreateInput& input) {
   return (input.term_deposit.has_value() ? 1 : 0) + (input.fund.has_value() ? 1 : 0) +
-         (input.bond.has_value() ? 1 : 0) + (input.insurance.has_value() ? 1 : 0);
+         (input.bond.has_value() ? 1 : 0) + (input.bond_fund.has_value() ? 1 : 0) +
+         (input.insurance.has_value() ? 1 : 0);
+}
+
+// 校验并补全债券基金的赎回日期。规则见「BOND_FUND 债券基金最终实现方案」：
+// - 首次可赎回日期缺省时按 购买日期 + 持有周期 计算，允许调用方手工修正；
+// - 持有期型（MIN_HOLDING）next_redeem_date 恒为空；
+// - 滚动型（ROLLING）next_redeem_date 缺省时取 existing_next（编辑时沿用已推进的值），
+//   否则等于 first_redeem_date。
+void normalize_bond_fund(BondFundDetail& detail,
+                         const std::optional<std::string>& existing_next) {
+  if (detail.holding_period_days <= 0) {
+    throw invalid_request("bond fund holding_period_days must be positive");
+  }
+  detail.purchase_date = time_util::require_date(detail.purchase_date, "purchase_date");
+  if (detail.first_redeem_date.has_value()) {
+    *detail.first_redeem_date =
+        time_util::require_date(*detail.first_redeem_date, "first_redeem_date");
+  } else {
+    detail.first_redeem_date =
+        time_util::add_days(detail.purchase_date, detail.holding_period_days);
+  }
+  if (detail.next_redeem_date.has_value()) {
+    *detail.next_redeem_date =
+        time_util::require_date(*detail.next_redeem_date, "next_redeem_date");
+  }
+  if (detail.maturity_date.has_value()) {
+    *detail.maturity_date = time_util::require_date(*detail.maturity_date, "maturity_date");
+  }
+  if (detail.holding_mode == HoldingMode::Rolling) {
+    if (!detail.next_redeem_date.has_value()) {
+      detail.next_redeem_date =
+          existing_next.has_value() ? existing_next : detail.first_redeem_date;
+    }
+  } else {
+    detail.next_redeem_date = std::nullopt;
+  }
+}
+
+// 校验并补全定期存款：start_date / term_value / term_unit 必填，
+// maturity_date 缺省时按存期（自然月/年）计算，允许用户手工修正。
+void normalize_term_deposit(TermDepositDetail& detail) {
+  if (!detail.start_date.has_value()) {
+    throw invalid_request("term deposit start_date is required");
+  }
+  *detail.start_date = time_util::require_date(*detail.start_date, "start_date");
+  if (!detail.term_value.has_value() || *detail.term_value <= 0) {
+    throw invalid_request("term deposit term_value must be positive");
+  }
+  if (!detail.term_unit.has_value()) {
+    throw invalid_request("term deposit term_unit is required");
+  }
+  if (detail.maturity_date.has_value()) {
+    *detail.maturity_date = time_util::require_date(*detail.maturity_date, "maturity_date");
+  } else {
+    detail.maturity_date =
+        time_util::add_term(*detail.start_date, *detail.term_value, *detail.term_unit);
+  }
 }
 
 }  // namespace
@@ -107,6 +166,7 @@ AssetBundle AssetService::create(std::int64_t household_id, const AssetCreateInp
   if (input.term_deposit.has_value()) {
     TermDepositDetail detail = *input.term_deposit;
     detail.asset_id = asset.id;
+    normalize_term_deposit(detail);
     assets_.upsert_term_deposit_detail(detail);
   }
   if (input.fund.has_value()) {
@@ -118,6 +178,12 @@ AssetBundle AssetService::create(std::int64_t household_id, const AssetCreateInp
     BondDetail detail = *input.bond;
     detail.asset_id = asset.id;
     assets_.upsert_bond_detail(detail);
+  }
+  if (input.bond_fund.has_value()) {
+    BondFundDetail detail = *input.bond_fund;
+    detail.asset_id = asset.id;
+    normalize_bond_fund(detail, std::nullopt);
+    assets_.upsert_bond_fund_detail(detail);
   }
   if (input.insurance.has_value()) {
     InsuranceDetail detail = *input.insurance;
@@ -170,6 +236,9 @@ AssetBundle AssetService::load_bundle(const Asset& asset) {
       break;
     case AssetType::Bond:
       bundle.bond = assets_.find_bond_detail(asset.id);
+      break;
+    case AssetType::BondFund:
+      bundle.bond_fund = assets_.find_bond_fund_detail(asset.id);
       break;
     case AssetType::Insurance:
       bundle.insurance = assets_.find_insurance_detail(asset.id);
@@ -230,6 +299,7 @@ Asset AssetService::update_status(std::int64_t id, AssetStatus status) {
 AssetBundle AssetService::update_detail(std::int64_t id, AssetType detail_type,
                                         const TermDepositDetail* term_deposit,
                                         const FundDetail* fund, const BondDetail* bond,
+                                        const BondFundDetail* bond_fund,
                                         const InsuranceDetail* insurance) {
   std::scoped_lock lock(database_.mutex());
   Asset asset = get(id);
@@ -246,6 +316,7 @@ AssetBundle AssetService::update_detail(std::int64_t id, AssetType detail_type,
       }
       TermDepositDetail detail = *term_deposit;
       detail.asset_id = id;
+      normalize_term_deposit(detail);
       assets_.upsert_term_deposit_detail(detail);
       break;
     }
@@ -267,6 +338,22 @@ AssetBundle AssetService::update_detail(std::int64_t id, AssetType detail_type,
       assets_.upsert_bond_detail(detail);
       break;
     }
+    case AssetType::BondFund: {
+      if (bond_fund == nullptr) {
+        throw invalid_request("bond_fund detail is required");
+      }
+      BondFundDetail detail = *bond_fund;
+      detail.asset_id = id;
+      // 编辑时若未显式给出 next_redeem_date，沿用数据库里已被每日维护推进的值，
+      // 避免用户只改其它字段就把赎回日重置回首期。
+      std::optional<std::string> existing_next;
+      if (const auto existing = assets_.find_bond_fund_detail(id); existing.has_value()) {
+        existing_next = existing->next_redeem_date;
+      }
+      normalize_bond_fund(detail, existing_next);
+      assets_.upsert_bond_fund_detail(detail);
+      break;
+    }
     case AssetType::Insurance: {
       if (insurance == nullptr) {
         throw invalid_request("insurance detail is required");
@@ -280,6 +367,15 @@ AssetBundle AssetService::update_detail(std::int64_t id, AssetType detail_type,
       throw invalid_request("this asset type has no detail block");
   }
   return load_bundle(asset);
+}
+
+void AssetService::remove(std::int64_t id) {
+  std::scoped_lock lock(database_.mutex());
+  get(id);  // 不存在则抛 not_found
+  // 资产、明细与流水通过外键级联删除，包在一个事务里保证整体一致。
+  TransactionGuard transaction(database_);
+  assets_.remove(id);
+  transaction.commit();
 }
 
 }  // namespace wt

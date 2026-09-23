@@ -16,11 +16,13 @@ namespace wt {
 enum class MemberRole { Owner, Member };
 enum class MemberStatus { Active, Inactive };
 enum class AccountType { Bank, Alipay, Wechat, Cash, Securities, Insurance, Other };
-enum class AssetType { Cash, TermDeposit, Fund, Bond, Insurance, Liability, Other };
+enum class AssetType { Cash, TermDeposit, Fund, Bond, BondFund, Insurance, Liability, Other };
 enum class AssetStatus { Active, Closed };
 enum class TransactionType { Income, Expense, TransferIn, TransferOut, Adjustment };
 enum class TransactionStatus { Normal, Void };
 enum class TermUnit { Day, Month, Year };
+// 债券基金持有方式：MinHolding=持有期债基，Rolling=滚动持有债基。
+enum class HoldingMode { MinHolding, Rolling };
 
 // 枚举 -> 数据库存储的大写字符串（如 MemberRole::Owner -> "OWNER"）。
 std::string_view to_string(MemberRole value);
@@ -31,6 +33,7 @@ std::string_view to_string(AssetStatus value);
 std::string_view to_string(TransactionType value);
 std::string_view to_string(TransactionStatus value);
 std::string_view to_string(TermUnit value);
+std::string_view to_string(HoldingMode value);
 
 // 数据库字符串 -> 枚举；无法识别时返回 std::nullopt（而非抛异常）。
 std::optional<MemberRole> parse_member_role(std::string_view text);
@@ -41,6 +44,7 @@ std::optional<AssetStatus> parse_asset_status(std::string_view text);
 std::optional<TransactionType> parse_transaction_type(std::string_view text);
 std::optional<TransactionStatus> parse_transaction_status(std::string_view text);
 std::optional<TermUnit> parse_term_unit(std::string_view text);
+std::optional<HoldingMode> parse_holding_mode(std::string_view text);
 
 // 一次交易对关联资产 current_balance 的带符号影响量（金额单位为「分」）。
 // 非转账类型遵循设计文档规则：

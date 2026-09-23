@@ -38,6 +38,14 @@ struct IncomeExpenseSummary {
   std::int64_t balance() const { return income - expense; }
 };
 
+// 单月收支汇总：month 为 "YYYY-MM"，金额单位为分。
+struct MonthlyIncomeExpense {
+  std::string month;
+  std::int64_t income = 0;
+  std::int64_t expense = 0;
+  std::int64_t balance() const { return income - expense; }
+};
+
 // 统计仓储。金额口径：整数分；资产聚合均只统计 status='ACTIVE'。
 class StatisticsRepository {
  public:

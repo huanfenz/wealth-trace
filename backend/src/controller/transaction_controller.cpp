@@ -127,6 +127,14 @@ void TransactionController::register_routes(crow::SimpleApp& app) {
   CROW_ROUTE(app, "/api/transactions/<int>").methods("GET"_method)([this](int id) {
     return http::handle([this, id] { return dto::to_json(service_.get(id)); });
   });
+
+  // DELETE /api/transactions/<int>：删除流水并回滚资产余额；流水不存在抛 404。
+  // 若为转账流水，会同组删除配对的两条，返回 {"deleted": 2}，否则 {"deleted": 1}。
+  CROW_ROUTE(app, "/api/transactions/<int>").methods("DELETE"_method)([this](int id) {
+    return http::handle([this, id] {
+      return nlohmann::json{{"deleted", service_.remove(id)}};
+    });
+  });
 }
 
 }  // namespace wt

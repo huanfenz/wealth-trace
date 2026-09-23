@@ -32,9 +32,10 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="90" align="right">
+        <el-table-column label="操作" width="130" align="right">
           <template #default="{ row }">
             <el-button link type="primary" @click="openEdit(row)">编辑</el-button>
+            <el-button link type="danger" @click="remove(row)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -60,7 +61,7 @@
             />
           </el-select>
         </el-form-item>
-        <el-form-item label="机构">
+        <el-form-item v-if="!hideInstitution" label="机构">
           <el-input v-model="form.institution_name" maxlength="100" />
         </el-form-item>
         <el-form-item label="脱敏账号">
@@ -83,12 +84,12 @@
 
 <script setup lang="ts">
 // 职责：展示/维护账户列表；支持按成员筛选，弹窗新增或编辑账户，保存后同步刷新 store 缓存。
-import { onMounted, reactive, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { computed, onMounted, reactive, ref } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 
 import AmountText from '@/components/AmountText.vue'
-import { createAccount, listAccounts, updateAccount } from '@/api'
+import { createAccount, deleteAccount, listAccounts, updateAccount } from '@/api'
 import { useAppStore } from '@/stores/app'
 import { accountTypeLabels } from '@/utils/labels'
 import type { Account, AccountType } from '@/types'
@@ -111,6 +112,9 @@ const form = reactive({
   remark: '',
   enabled: true,
 })
+
+// 现金、支付宝、微信类账户无需填写机构名，隐藏该表单项。
+const hideInstitution = computed(() => ['CASH', 'ALIPAY', 'WECHAT'].includes(form.type))
 
 // 按筛选条件拉取账户列表，并同步 store 中的账户缓存（供其他页面下拉使用）。
 async function load() {
@@ -166,6 +170,9 @@ async function save() {
   }
   saving.value = true
   try {
+    if (hideInstitution.value) {
+      form.institution_name = ''
+    }
     const payload = { ...form }
     if (editing.value) {
       await updateAccount(editing.value.id, payload)
@@ -183,4 +190,30 @@ async function save() {
 }
 
 onMounted(load)
+
+// 删除账户：账户下仍有资产时直接给出友好提示；否则二次确认后调用接口。
+async function remove(account: Account) {
+  if (account.asset_count > 0) {
+    ElMessage.warning(
+      `账户「${account.name}」下还有 ${account.asset_count} 个资产，请先删除或转移这些资产后再删除账户`,
+    )
+    return
+  }
+  try {
+    await ElMessageBox.confirm(
+      `确认删除账户「${account.name}」？删除后不可恢复。`,
+      '确认删除',
+      { type: 'warning' },
+    )
+  } catch {
+    return
+  }
+  try {
+    await deleteAccount(account.id)
+    await load()
+    ElMessage.success('已删除')
+  } catch (error) {
+    ElMessage.error((error as Error).message)
+  }
+}
 </script>

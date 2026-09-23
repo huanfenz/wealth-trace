@@ -9,7 +9,7 @@ namespace wt {
 
 class Database;
 
-// 交易 / 转账的 REST 接口：流水列表、记收入、记支出、调整、转账、单条查询。
+// 交易 / 转账的 REST 接口：流水列表、记收入、记支出、调整、转账、单条查询、删除。
 class TransactionController {
  public:
   explicit TransactionController(Database& database) : service_(database) {}

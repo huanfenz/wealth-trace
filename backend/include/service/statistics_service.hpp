@@ -61,6 +61,10 @@ class StatisticsService {
                           const std::string& to_time,
                           std::optional<std::int64_t> member_id);
 
+  // 近 N 个月收支趋势：以当前月为终点往前推 N-1 个月，按月汇总收支并补零缺月，
+  // 按月份升序返回。months 超出 1..36 抛 invalid_request。
+  std::vector<MonthlyIncomeExpense> monthly(std::int64_t household_id, int months);
+
  private:
   // 前置校验：家庭必须存在，否则抛 not_found。
   void require_household(std::int64_t household_id);

@@ -130,6 +130,27 @@ std::optional<Transaction> TransactionRepository::find_by_id(std::int64_t id) {
   return map_transaction(statement);
 }
 
+// 按转账分组查询配对流水，按 id 升序（转出行先创建，通常排在前）。
+std::vector<Transaction> TransactionRepository::list_by_transfer_group(
+    std::int64_t group_id) {
+  Statement statement(database_, std::string("SELECT ") + kSelectColumns +
+                                     " FROM \"transaction\" WHERE transfer_group_id = ? "
+                                     "ORDER BY id ASC;");
+  statement.bind(1, group_id);
+  std::vector<Transaction> transactions;
+  while (statement.step()) {
+    transactions.push_back(map_transaction(statement));
+  }
+  return transactions;
+}
+
+bool TransactionRepository::remove(std::int64_t id) {
+  Statement statement(database_, "DELETE FROM \"transaction\" WHERE id = ?;");
+  statement.bind(1, id);
+  statement.run();
+  return database_.changes() > 0;
+}
+
 // 列表：拼出 SELECT + build_where + 排序分页，先绑定 WHERE 参数再绑定 LIMIT/OFFSET。
 std::vector<Transaction> TransactionRepository::list(const TransactionQuery& query) {
   std::vector<std::pair<int, std::string>> text_bindings;

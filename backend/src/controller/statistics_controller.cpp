@@ -14,15 +14,15 @@
 namespace wt {
 namespace {
 
-// 从今天的 ISO8601 日期串取当前年份，作为 overview 的默认年。
+// 从业务日期取当前年份，作为 overview 的默认年。
 int current_year() {
-  const std::string today = time_util::today_iso8601();
+  const std::string today = time_util::business_today();
   return std::stoi(today.substr(0, 4));
 }
 
-// 从今天的 ISO8601 日期串取当前月份，作为 overview 的默认月。
+// 从业务日期取当前月份，作为 overview 的默认月。
 int current_month() {
-  const std::string today = time_util::today_iso8601();
+  const std::string today = time_util::business_today();
   return std::stoi(today.substr(5, 2));
 }
 
@@ -52,6 +52,20 @@ void StatisticsController::register_routes(crow::SimpleApp& app) {
           }
           const auto member_id = http::query_int64(request, "owner_member_id");
           return dto::to_json(service_.period(id, *from, *to, member_id));
+        });
+      });
+
+  // GET /api/households/<int>/statistics/monthly：近 N 个月收支趋势，
+  // months 缺省 6（1..36），返回按月升序、缺月补零的数组。
+  CROW_ROUTE(app, "/api/households/<int>/statistics/monthly").methods("GET"_method)(
+      [this](const crow::request& request, int id) {
+        return http::handle([this, &request, id] {
+          const int months = http::query_int(request, "months", 6);
+          nlohmann::json data = nlohmann::json::array();
+          for (const auto& item : service_.monthly(id, months)) {
+            data.push_back(dto::to_json(item));
+          }
+          return data;
         });
       });
 }

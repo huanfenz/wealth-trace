@@ -45,6 +45,9 @@ struct Config {
   LogConfig log;
   FrontendConfig frontend;
   CategoryConfig categories;
+  // 业务时区（IANA 名称）。影响「业务日期」口径：债券基金赎回日推进与可赎回状态判断。
+  // 审计时间戳仍以 UTC 存储。默认 Asia/Shanghai。
+  std::string business_timezone = "Asia/Shanghai";
 
   // 从 JSON 文件加载配置：缺失的键保留默认值；
   // 文件不存在不算错误，直接返回默认配置。

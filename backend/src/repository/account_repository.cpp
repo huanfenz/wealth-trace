@@ -112,6 +112,13 @@ bool AccountRepository::update(const Account& account) {
   return database_.changes() > 0;
 }
 
+bool AccountRepository::remove(std::int64_t id) {
+  Statement statement(database_, "DELETE FROM account WHERE id = ?;");
+  statement.bind(1, id);
+  statement.run();
+  return database_.changes() > 0;
+}
+
 bool AccountRepository::exists(std::int64_t id) {
   Statement statement(database_, "SELECT COUNT(*) FROM account WHERE id = ?;");
   statement.bind(1, id);

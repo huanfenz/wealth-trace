@@ -1,10 +1,13 @@
 // DTO 序列化实现。金额一律为「分」，负债为负值；可选值缺省时输出 JSON null。
 #include "dto/serialization.hpp"
 
+#include <cstdint>
 #include <optional>
 #include <string>
 
 #include <nlohmann/json.hpp>
+
+#include "utils/time_util.hpp"
 
 namespace wt::dto {
 namespace {
@@ -17,6 +20,64 @@ nlohmann::json optional_text(const std::optional<std::string>& value) {
 // 可选整数 -> JSON：有值输出数字，无值输出 null。
 nlohmann::json optional_int(const std::optional<std::int64_t>& value) {
   return value.has_value() ? nlohmann::json(*value) : nlohmann::json(nullptr);
+}
+
+// 债券基金赎回状态：按业务日期实时推导，不落库，避免状态字段与日期字段不一致。
+//   MIN_HOLDING：today < first -> LOCKED；today >= first -> REDEEMABLE
+//   ROLLING    ：today < next  -> LOCKED；today == next -> REDEEMABLE_TODAY；
+//                today > next  -> PENDING（每日维护尚未推进）
+std::string bond_fund_status(const BondFundDetail& detail, const std::string& today) {
+  if (detail.holding_mode == HoldingMode::Rolling) {
+    if (!detail.next_redeem_date.has_value()) {
+      return "UNKNOWN";
+    }
+    if (today < *detail.next_redeem_date) {
+      return "LOCKED";
+    }
+    if (today == *detail.next_redeem_date) {
+      return "REDEEMABLE_TODAY";
+    }
+    return "PENDING";
+  }
+  if (!detail.first_redeem_date.has_value()) {
+    return "UNKNOWN";
+  }
+  return today < *detail.first_redeem_date ? "LOCKED" : "REDEEMABLE";
+}
+
+// 距离可赎回日的天数（业务日期 -> 目标日期的有符号差）；目标日期为空时返回 null。
+std::optional<std::int64_t> bond_fund_days_until(const BondFundDetail& detail,
+                                                 const std::string& today) {
+  const auto& target = detail.holding_mode == HoldingMode::Rolling
+                           ? detail.next_redeem_date
+                           : detail.first_redeem_date;
+  if (!target.has_value()) {
+    return std::nullopt;
+  }
+  return time_util::days_between(today, *target);
+}
+
+// 定期存款到期状态（按业务日期实时推导，不落库）：
+//   today < maturity  -> ACTIVE（存续中）
+//   today >= maturity -> MATURED（未自动续存，等待用户处理）
+//                        / ACTIVE（自动续存，已进入下一存期）
+std::string term_deposit_status(const TermDepositDetail& detail, const std::string& today) {
+  if (!detail.maturity_date.has_value()) {
+    return "UNKNOWN";
+  }
+  if (today < *detail.maturity_date) {
+    return "ACTIVE";
+  }
+  return detail.auto_rollover ? "ACTIVE" : "MATURED";
+}
+
+// 距离到期日的天数（业务日期 -> 到期日的有符号差）；到期日为空时返回 null。
+std::optional<std::int64_t> term_deposit_days_until(const TermDepositDetail& detail,
+                                                    const std::string& today) {
+  if (!detail.maturity_date.has_value()) {
+    return std::nullopt;
+  }
+  return time_util::days_between(today, *detail.maturity_date);
 }
 
 }  // namespace
@@ -80,13 +141,13 @@ nlohmann::json to_json(const Asset& asset) {
           {"updated_at", asset.updated_at}};
 }
 
-// 定期存款明细：principal 本金（分）、annual_interest_rate 年利率（定点整数，
-// 除以 RATE_SCALE=1000000 得到小数），日期为可空字符串，term_unit 为枚举名，
-// term_value 存期数值可选，auto_rollover 是否自动转存。
+// 定期存款明细：annual_interest_rate 年利率（定点整数，除以 RATE_SCALE=1000000 得到小数），
+// 日期为可空字符串，term_unit 为枚举名，term_value 存期数值，auto_rollover 是否自动转存。
+// 本金统一取 asset.opening_balance，不再在明细里返回。
 nlohmann::json to_json(const TermDepositDetail& detail) {
+  const std::string today = time_util::business_today();
   nlohmann::json json;
   json["asset_id"] = detail.asset_id;
-  json["principal"] = detail.principal;
   json["annual_interest_rate"] = detail.annual_interest_rate;
   json["start_date"] = optional_text(detail.start_date);
   json["maturity_date"] = optional_text(detail.maturity_date);
@@ -97,29 +158,47 @@ nlohmann::json to_json(const TermDepositDetail& detail) {
   json["interest_type"] = optional_text(detail.interest_type);
   json["auto_rollover"] = detail.auto_rollover;
   json["maturity_action"] = optional_text(detail.maturity_action);
+  // 只读派生字段：由后端按业务日期推导，前端直接展示。
+  json["status"] = term_deposit_status(detail, today);
+  json["days_until_maturity"] = optional_int(term_deposit_days_until(detail, today));
   return json;
 }
 
-// 基金明细：代码 / 名称 / 类型与锁定期起止日期均可选。
+// 基金明细：代码 / 类型与锁定期起止日期均可选；名称统一使用 asset.name。
 nlohmann::json to_json(const FundDetail& detail) {
   return {{"asset_id", detail.asset_id},
           {"fund_code", optional_text(detail.fund_code)},
-          {"fund_name", optional_text(detail.fund_name)},
           {"fund_type", optional_text(detail.fund_type)},
           {"lock_start_date", optional_text(detail.lock_start_date)},
           {"lock_end_date", optional_text(detail.lock_end_date)}};
 }
 
-// 债券明细：principal 本金（分），annual_coupon_rate 票面利率（定点整数）。
+// 债券明细：annual_coupon_rate 票面利率（定点整数）；名称用 asset.name，本金用 opening_balance。
 nlohmann::json to_json(const BondDetail& detail) {
   return {{"asset_id", detail.asset_id},
           {"bond_code", optional_text(detail.bond_code)},
-          {"bond_name", optional_text(detail.bond_name)},
-          {"principal", detail.principal},
           {"annual_coupon_rate", detail.annual_coupon_rate},
           {"purchase_date", optional_text(detail.purchase_date)},
           {"maturity_date", optional_text(detail.maturity_date)},
           {"lock_end_date", optional_text(detail.lock_end_date)}};
+}
+
+// 债券基金明细：预期年化收益率（定点整数）、持有方式枚举名，
+// 以及购买/首次赎回/下次赎回/最终到期日期（均可空）。名称用 asset.name，本金用 opening_balance。
+nlohmann::json to_json(const BondFundDetail& detail) {
+  const std::string today = time_util::business_today();
+  return {{"asset_id", detail.asset_id},
+          {"fund_code", optional_text(detail.fund_code)},
+          {"expected_annual_yield_rate", optional_int(detail.expected_annual_yield_rate)},
+          {"purchase_date", detail.purchase_date},
+          {"holding_mode", std::string(to_string(detail.holding_mode))},
+          {"holding_period_days", detail.holding_period_days},
+          {"first_redeem_date", optional_text(detail.first_redeem_date)},
+          {"next_redeem_date", optional_text(detail.next_redeem_date)},
+          {"maturity_date", optional_text(detail.maturity_date)},
+          // 以下为按业务日期实时推导的只读字段，供前端直接展示，避免前端用浏览器日期推断。
+          {"status", bond_fund_status(detail, today)},
+          {"days_until_redeem", optional_int(bond_fund_days_until(detail, today))}};
 }
 
 // 保险明细：保费 / 已缴 / 保额均为「分」，payment_years 缴费年限可选。
@@ -146,6 +225,8 @@ nlohmann::json to_json(const AssetBundle& bundle) {
                              : nlohmann::json(nullptr);
   json["fund"] = bundle.fund.has_value() ? to_json(*bundle.fund) : nlohmann::json(nullptr);
   json["bond"] = bundle.bond.has_value() ? to_json(*bundle.bond) : nlohmann::json(nullptr);
+  json["bond_fund"] = bundle.bond_fund.has_value() ? to_json(*bundle.bond_fund)
+                                                    : nlohmann::json(nullptr);
   json["insurance"] = bundle.insurance.has_value() ? to_json(*bundle.insurance)
                                                     : nlohmann::json(nullptr);
   return json;
@@ -190,6 +271,14 @@ nlohmann::json to_json(const TypeAmount& amount) {
 // 按收支分类聚合：分类名 + 金额（分）。
 nlohmann::json to_json(const CategoryAmount& amount) {
   return {{"category", amount.category}, {"amount", amount.amount}};
+}
+
+// 单月收支：month 为 "YYYY-MM"，income/expense/balance 单位均为分。
+nlohmann::json to_json(const MonthlyIncomeExpense& amount) {
+  return {{"month", amount.month},
+          {"income", amount.income},
+          {"expense", amount.expense},
+          {"balance", amount.balance()}};
 }
 
 // 家庭总览：总资产 / 总负债 / 净资产 / 当月收入 / 支出 / 结余，

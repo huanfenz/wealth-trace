@@ -1,10 +1,12 @@
 // 统计服务实现：家庭资产总览与收支区间统计，负责月份区间换算与口径校验。
 #include "service/statistics_service.hpp"
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "common/error.hpp"
@@ -28,19 +30,16 @@ int days_in_month(int year, int month) {
   return kDays[month - 1];
 }
 
-// 生成区间起点：当月 1 日 00:00:00（UTC 字符串）。
-std::string format_datetime(int year, int month, int day) {
-  char buffer[32];
-  std::snprintf(buffer, sizeof(buffer), "%04d-%02d-%02d 00:00:00", year, month, day);
-  return buffer;
-}
-
-// 生成区间终点：当月最后一日 23:59:59，与起点构成闭区间，
-// 确保当月最后一秒的流水也被计入。
-std::string format_datetime_end(int year, int month, int day) {
-  char buffer[32];
-  std::snprintf(buffer, sizeof(buffer), "%04d-%02d-%02d 23:59:59", year, month, day);
-  return buffer;
+// 计算业务时区下「某年某月」的闭区间 [首日 00:00:00, 末日 23:59:59]，
+// 再换算成 UTC 字符串，用于查询以 UTC 存储的 transaction_time。
+// 每个月的边界单独换算，因此即使业务时区有夏令时也正确。
+std::pair<std::string, std::string> month_utc_range(int year, int month) {
+  char from[32];
+  char to[32];
+  std::snprintf(from, sizeof(from), "%04d-%02d-01 00:00:00", year, month);
+  std::snprintf(to, sizeof(to), "%04d-%02d-%02d 23:59:59", year, month,
+               days_in_month(year, month));
+  return {time_util::business_to_utc(from), time_util::business_to_utc(to)};
 }
 
 }  // namespace
@@ -73,10 +72,8 @@ HouseholdOverview StatisticsService::overview(std::int64_t household_id, int yea
   overview.by_account = statistics_.assets_by_account(household_id);
   overview.by_type = statistics_.assets_by_type(household_id);
 
-  // 把「年-月」换算成闭区间 [1 日 00:00:00, 末日 23:59:59]；
-  // 末日按实际天数（含闰年 2 月）计算，避免末尾漏统计。
-  const std::string from = format_datetime(year, month, 1);
-  const std::string to = format_datetime_end(year, month, days_in_month(year, month));
+  // 业务时区下的「年-月」闭区间，换算成 UTC 后查询（transaction_time 存 UTC）。
+  const auto [from, to] = month_utc_range(year, month);
   const auto month_summary =
       statistics_.income_expense(household_id, std::nullopt, from, to);
   overview.month_income = month_summary.income;
@@ -91,27 +88,70 @@ PeriodStatistics StatisticsService::period(
   std::scoped_lock lock(database_.mutex());
   require_household(household_id);
   PeriodStatistics result;
-  // 两端时间都要求合法 UTC 格式；字符串按 ISO8601 字典序比较即等价于时间先后。
+  // from/to 由用户按业务时区填写；仅校验格式，随后换算成 UTC 区间查询。
   result.from_time = time_util::require_datetime(from_time, "from");
   result.to_time = time_util::require_datetime(to_time, "to");
   if (result.from_time > result.to_time) {
     throw invalid_request("from must not be after to");
   }
+  const std::string from_utc = time_util::business_to_utc(result.from_time);
+  const std::string to_utc = time_util::business_to_utc(result.to_time);
 
   // 收支口径：只汇总 INCOME/EXPENSE，转账/调整不计入，避免内部流转被
   // 误当成收入或支出。member_id 只作用于总收支，不改变下面的分布统计。
   const auto summary =
-      statistics_.income_expense(household_id, member_id, result.from_time, result.to_time);
+      statistics_.income_expense(household_id, member_id, from_utc, to_utc);
   result.income = summary.income;
   result.expense = summary.expense;
   result.balance = summary.balance();
   // 成员分布固定按整个家庭统计（不随后面的 member_id 过滤而收窄）。
   result.by_member =
-      statistics_.income_expense_by_member(household_id, result.from_time, result.to_time);
+      statistics_.income_expense_by_member(household_id, from_utc, to_utc);
   result.expense_categories =
-      statistics_.expense_by_category(household_id, result.from_time, result.to_time);
+      statistics_.expense_by_category(household_id, from_utc, to_utc);
   result.income_categories =
-      statistics_.income_by_category(household_id, result.from_time, result.to_time);
+      statistics_.income_by_category(household_id, from_utc, to_utc);
+  return result;
+}
+
+std::vector<MonthlyIncomeExpense> StatisticsService::monthly(std::int64_t household_id,
+                                                             int months) {
+  std::scoped_lock lock(database_.mutex());
+  require_household(household_id);
+  if (months < 1 || months > 36) {
+    throw invalid_request("months must be between 1 and 36");
+  }
+
+  // 以业务时区下的当前自然月为终点，向前取 N 个月，先收集再反转成升序。
+  const std::string today = time_util::business_today();
+  int year = std::stoi(today.substr(0, 4));
+  int month = std::stoi(today.substr(5, 2));
+
+  std::vector<std::pair<int, int>> month_list;  // (year, month)
+  for (int i = 0; i < months; ++i) {
+    month_list.emplace_back(year, month);
+    if (--month == 0) {
+      month = 12;
+      --year;
+    }
+  }
+  std::reverse(month_list.begin(), month_list.end());
+
+  // 逐月按业务时区边界查询收支；每月边界单独换算成 UTC，跨夏令时也正确。
+  // 单次聚合查询足够轻量，N 最大 36，无需在 SQL 里做时区分组。
+  std::vector<MonthlyIncomeExpense> result;
+  result.reserve(month_list.size());
+  for (const auto& [y, m] : month_list) {
+    const auto [from, to] = month_utc_range(y, m);
+    const auto summary = statistics_.income_expense(household_id, std::nullopt, from, to);
+    MonthlyIncomeExpense row;
+    char buffer[8];
+    std::snprintf(buffer, sizeof(buffer), "%04d-%02d", y, m);
+    row.month = buffer;
+    row.income = summary.income;
+    row.expense = summary.expense;
+    result.push_back(row);
+  }
   return result;
 }
 

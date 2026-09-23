@@ -9,7 +9,7 @@ namespace wt {
 
 class Database;
 
-// 账户资源的 REST 接口：家庭下账户列表 / 新建 / 查询 / 更新。
+// 账户资源的 REST 接口：家庭下账户列表 / 新建 / 查询 / 更新 / 删除。
 class AccountController {
  public:
   explicit AccountController(Database& database) : service_(database) {}

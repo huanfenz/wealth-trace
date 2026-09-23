@@ -63,9 +63,9 @@ struct Asset {
 };
 
 // 定期存款扩展信息（asset_type = TERM_DEPOSIT 时使用）。
+// 本金不再单独保存，统一以 asset.opening_balance 为准。
 struct TermDepositDetail {
   std::int64_t asset_id = 0;             // 对应资产 id
-  std::int64_t principal = 0;            // 本金（分）
   std::int64_t annual_interest_rate = 0; // 年利率，定点整数，RATE_SCALE=1000000（1.85% 存为 18500）
   std::optional<std::string> start_date;    // 起息日 "YYYY-MM-DD"（可空）
   std::optional<std::string> maturity_date; // 到期日 "YYYY-MM-DD"（可空）
@@ -76,26 +76,41 @@ struct TermDepositDetail {
   std::optional<std::string> maturity_action; // 到期处理方式（可空）
 };
 
-// 基金扩展信息（asset_type = FUND 时使用）。
+// 基金扩展信息（asset_type = FUND 时使用）。基金名称统一使用 asset.name。
 struct FundDetail {
   std::int64_t asset_id = 0;                   // 对应资产 id
   std::optional<std::string> fund_code;        // 基金代码（可空）
-  std::optional<std::string> fund_name;        // 基金名称（可空）
   std::optional<std::string> fund_type;        // 基金类型（可空）
   std::optional<std::string> lock_start_date;  // 锁定期开始日 "YYYY-MM-DD"（可空）
   std::optional<std::string> lock_end_date;    // 锁定期结束日 "YYYY-MM-DD"（可空）
 };
 
 // 债券扩展信息（asset_type = BOND 时使用）。
+// 债券名称统一使用 asset.name；本金统一以 asset.opening_balance 为准。
 struct BondDetail {
   std::int64_t asset_id = 0;                 // 对应资产 id
   std::optional<std::string> bond_code;      // 债券代码（可空）
-  std::optional<std::string> bond_name;      // 债券名称（可空）
-  std::int64_t principal = 0;                // 本金（分）
   std::int64_t annual_coupon_rate = 0;       // 年票息率，定点整数，RATE_SCALE=1000000
   std::optional<std::string> purchase_date;  // 买入日 "YYYY-MM-DD"（可空）
   std::optional<std::string> maturity_date;  // 到期日 "YYYY-MM-DD"（可空）
   std::optional<std::string> lock_end_date;  // 锁定期结束日 "YYYY-MM-DD"（可空）
+};
+
+// 债券基金扩展信息（asset_type = BOND_FUND 时使用）。
+// 两类债券基金共用，通过 holding_mode 区分：
+//   MIN_HOLDING：持有期债基，next_redeem_date 恒为空，first_redeem_date 创建后不变；
+//   ROLLING：滚动持有债基，next_redeem_date 由每日维护按 holding_period_days 推进。
+// 基金名称统一使用 asset.name；本金统一以 asset.opening_balance 为准。
+struct BondFundDetail {
+  std::int64_t asset_id = 0;                          // 对应资产 id
+  std::optional<std::string> fund_code;               // 基金代码（可空）
+  std::optional<std::int64_t> expected_annual_yield_rate;  // 预期年化收益率，定点 RATE_SCALE=1000000（可空）
+  std::string purchase_date;                          // 买入/申购确认日期 "YYYY-MM-DD"
+  HoldingMode holding_mode = HoldingMode::MinHolding; // 持有方式
+  std::int64_t holding_period_days = 0;               // 持有周期（天）
+  std::optional<std::string> first_redeem_date;       // 首次可赎回日期 "YYYY-MM-DD"（可空）
+  std::optional<std::string> next_redeem_date;        // 下一次可赎回日期，仅 ROLLING（可空）
+  std::optional<std::string> maturity_date;           // 产品最终到期日（可空）
 };
 
 // 保险扩展信息（asset_type = INSURANCE 时使用）。

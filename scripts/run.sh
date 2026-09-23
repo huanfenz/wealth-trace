@@ -6,6 +6,8 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 BUILD_DIR="${PROJECT_DIR}/build"
 BACKEND_BIN="${BUILD_DIR}/backend/wealth-trace"
+VITE_PORT=5173
+DEFAULT_BACKEND_PORT=8080
 
 usage() {
   cat <<'EOF'
@@ -18,7 +20,8 @@ Modes:
         The backend serves frontend/dist and provides SPA route fallback.
 
 The optional config file defaults to config.json in the project root.
-Use Ctrl-C to stop the active server(s).
+The required backend/Vite ports must be free before starting. Use Ctrl-C to
+stop the server(s) started by this script.
 EOF
 }
 
@@ -29,6 +32,38 @@ die() {
 
 require_command() {
   command -v "$1" >/dev/null 2>&1 || die "missing required command: $1"
+}
+
+# 从配置文件中提取 server.port，缺失时回退到默认端口。
+config_port() {
+  local port
+  port="$(sed -n 's/.*"port"[[:space:]]*:[[:space:]]*\([0-9]\{1,\}\).*/\1/p' "$1" | head -n 1)"
+  printf '%s' "${port:-${DEFAULT_BACKEND_PORT}}"
+}
+
+# 列出监听指定端口的进程 PID（优先 ss，其次 lsof；都不可用时返回空）。
+port_pids() {
+  local port="$1"
+  if command -v ss >/dev/null 2>&1; then
+    ss -ltnpH "sport = :${port}" 2>/dev/null |
+      sed -n 's/.*pid=\([0-9]\{1,\}\).*/\1/p' | sort -u
+  elif command -v lsof >/dev/null 2>&1; then
+    lsof -tiTCP:"${port}" -sTCP:LISTEN 2>/dev/null | sort -u
+  fi
+}
+
+# 启动前确认端口可用。不能仅凭端口判断进程是否由本脚本启动，
+# 因此绝不终止监听进程，避免误杀其它项目或服务。
+require_free_port() {
+  local port="$1"
+  local -a pid_list
+  mapfile -t pid_list < <(port_pids "${port}")
+
+  if [[ ${#pid_list[@]} -eq 0 ]]; then
+    return 0
+  fi
+
+  die "port ${port} is already in use by PID(s): ${pid_list[*]}; stop the owning process or choose another port"
 }
 
 prepare_frontend() {
@@ -99,6 +134,8 @@ cd "${PROJECT_DIR}"
 prepare_frontend
 build_backend
 
+BACKEND_PORT="$(config_port "${CONFIG_FILE}")"
+
 if [[ "${mode}" == 'prod' ]]; then
   printf '%s\n' 'Building frontend for backend static hosting...'
   (
@@ -106,11 +143,16 @@ if [[ "${mode}" == 'prod' ]]; then
     npm run build
   )
 
-  printf 'Starting production server at http://127.0.0.1:8080 (config: %s)\n' "${CONFIG_FILE}"
+  require_free_port "${BACKEND_PORT}"
+  printf 'Starting production server at http://127.0.0.1:%s (config: %s)\n' \
+    "${BACKEND_PORT}" "${CONFIG_FILE}"
   exec "${BACKEND_BIN}" "${CONFIG_FILE}"
 fi
 
-printf 'Starting development backend at http://127.0.0.1:8080 (config: %s)\n' "${CONFIG_FILE}"
+require_free_port "${BACKEND_PORT}"
+require_free_port "${VITE_PORT}"
+printf 'Starting development backend at http://127.0.0.1:%s (config: %s)\n' \
+  "${BACKEND_PORT}" "${CONFIG_FILE}"
 "${BACKEND_BIN}" "${CONFIG_FILE}" &
 backend_pid=$!
 trap cleanup EXIT INT TERM
@@ -121,10 +163,10 @@ if ! kill -0 "${backend_pid}" 2>/dev/null; then
   wait "${backend_pid}"
 fi
 
-printf '%s\n' 'Starting Vite development server at http://127.0.0.1:5173 ...'
+printf 'Starting Vite development server at http://127.0.0.1:%s ...\n' "${VITE_PORT}"
 (
   cd "${PROJECT_DIR}/frontend"
-  exec npm run dev -- --host 127.0.0.1 --port 5173
+  exec npm run dev -- --host 127.0.0.1 --port "${VITE_PORT}"
 ) &
 vite_pid=$!
 wait "${vite_pid}"

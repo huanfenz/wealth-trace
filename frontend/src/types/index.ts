@@ -14,9 +14,11 @@ export type AssetType =
   | 'TERM_DEPOSIT' // 定期存款（有 term_deposit 明细）
   | 'FUND' // 基金（有 fund 明细）
   | 'BOND' // 债券（有 bond 明细）
+  | 'BOND_FUND' // 债券基金（有 bond_fund 明细）
   | 'INSURANCE' // 保险（有 insurance 明细）
   | 'LIABILITY' // 负债
   | 'OTHER' // 其他
+export type HoldingMode = 'MIN_HOLDING' | 'ROLLING' // 债券基金持有方式：持有期 / 滚动持有
 export type AssetStatus = 'ACTIVE' | 'CLOSED' // 资产状态：有效 / 已关闭
 export type TransactionType =
   | 'INCOME' // 收入
@@ -65,7 +67,6 @@ export interface Account {
 /** 定期存款明细（Asset 的子结构）。 */
 export interface TermDepositDetail {
   asset_id: number
-  principal: number // 本金（分）
   annual_interest_rate: number // 年利率（1000000 定点）
   start_date: string | null // 起息日（可空）
   maturity_date: string | null // 到期日（可空）
@@ -74,13 +75,14 @@ export interface TermDepositDetail {
   interest_type: string | null // 计息方式（可空）
   auto_rollover: boolean // 是否自动转存
   maturity_action: string | null // 到期处理方式（可空）
+  status: string // 后端按业务日期推导：ACTIVE/MATURED/UNKNOWN
+  days_until_maturity: number | null // 距到期天数（后端按业务日期计算，可空）
 }
 
 /** 基金明细（Asset 的子结构）。 */
 export interface FundDetail {
   asset_id: number
   fund_code: string | null // 基金代码（可空）
-  fund_name: string | null // 基金名称（可空）
   fund_type: string | null // 基金类型（可空）
   lock_start_date: string | null // 锁定期开始（可空）
   lock_end_date: string | null // 锁定期结束（可空）
@@ -90,12 +92,25 @@ export interface FundDetail {
 export interface BondDetail {
   asset_id: number
   bond_code: string | null // 债券代码（可空）
-  bond_name: string | null // 债券名称（可空）
-  principal: number // 本金（分）
   annual_coupon_rate: number // 票面年利率（1000000 定点）
   purchase_date: string | null // 购买日期（可空）
   maturity_date: string | null // 到期日期（可空）
   lock_end_date: string | null // 锁定期结束（可空）
+}
+
+/** 债券基金明细（Asset 的子结构）。 */
+export interface BondFundDetail {
+  asset_id: number
+  fund_code: string | null // 基金代码（可空）
+  expected_annual_yield_rate: number | null // 预期年化收益率（1000000 定点，可空）
+  purchase_date: string // 买入/申购确认日期 YYYY-MM-DD
+  holding_mode: HoldingMode // 持有方式
+  holding_period_days: number // 持有周期（天）
+  first_redeem_date: string | null // 首次可赎回日期（可空）
+  next_redeem_date: string | null // 下一次可赎回日期，仅滚动型（可空）
+  maturity_date: string | null // 产品最终到期日（可空）
+  status: string // 后端按业务日期推导的状态：LOCKED/REDEEMABLE/REDEEMABLE_TODAY/PENDING
+  days_until_redeem: number | null // 距可赎回天数（后端按业务日期计算，可空）
 }
 
 /** 保险明细（Asset 的子结构）。 */
@@ -128,6 +143,7 @@ export interface Asset {
   term_deposit: TermDepositDetail | null // 定期存款明细（仅 TERM_DEPOSIT）
   fund: FundDetail | null // 基金明细（仅 FUND）
   bond: BondDetail | null // 债券明细（仅 BOND）
+  bond_fund: BondFundDetail | null // 债券基金明细（仅 BOND_FUND）
   insurance: InsuranceDetail | null // 保险明细（仅 INSURANCE）
   created_at: string
   updated_at: string
@@ -196,6 +212,14 @@ export interface PeriodStatistics {
   expense_categories: CategoryAmount[] // 支出分类汇总
 }
 
+/** 单月收支趋势项。 */
+export interface MonthlyStat {
+  month: string // YYYY-MM
+  income: number // 收入（分）
+  expense: number // 支出（分）
+  balance: number // 结余（分）
+}
+
 /** 分页结果包装。 */
 export interface Paged<T> {
   total: number // 总条数
@@ -216,4 +240,6 @@ export interface Meta {
   expense_categories: string[]
   money: { unit: string; minor_units_per_yuan: number } // 金额单位及每元对应的最小单位数
   rate_scale: number // 利率定点缩放倍数
+  business_timezone: string // 业务时区（如 Asia/Shanghai）
+  business_date: string // 后端当前业务日期 YYYY-MM-DD
 }

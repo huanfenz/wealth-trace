@@ -25,6 +25,8 @@ class AccountRepository {
                                          std::optional<std::int64_t> owner_member_id);
   // 按 id 更新账户字段；返回是否真正改动了行。
   bool update(const Account& account);
+  // 按 id 删除账户；返回是否真正删除了行。
+  bool remove(std::int64_t id);
   // 判断主键是否存在。
   bool exists(std::int64_t id);
 

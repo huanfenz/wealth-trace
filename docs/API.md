@@ -26,7 +26,8 @@
 
 > 系统仅支持人民币（CNY，无币种字段）。所有金额字段单位均为**分**（整数）；
 > 利率字段为 6 位定点整数（`18500 = 1.85%`）；
-> 时间为 UTC 字符串 `YYYY-MM-DD HH:MM:SS`，日期为 `YYYY-MM-DD`。
+> 审计时间戳（`created_at` / `updated_at` / `transaction_time`）为 UTC 字符串 `YYYY-MM-DD HH:MM:SS`；
+> 业务日期字段（如债券基金赎回日）为 `YYYY-MM-DD`，按业务时区 `business_timezone`（默认 `Asia/Shanghai`）口径。
 
 ---
 
@@ -50,14 +51,16 @@
     "member_roles": ["OWNER", "MEMBER"],
     "member_statuses": ["ACTIVE", "INACTIVE"],
     "account_types": ["BANK", "ALIPAY", "WECHAT", "CASH", "SECURITIES", "INSURANCE", "OTHER"],
-    "asset_types": ["CASH", "TERM_DEPOSIT", "FUND", "BOND", "INSURANCE", "LIABILITY", "OTHER"],
+    "asset_types": ["CASH", "TERM_DEPOSIT", "FUND", "BOND", "BOND_FUND", "INSURANCE", "LIABILITY", "OTHER"],
     "asset_statuses": ["ACTIVE", "CLOSED"],
     "transaction_types": ["INCOME", "EXPENSE", "TRANSFER_IN", "TRANSFER_OUT", "ADJUSTMENT"],
     "term_units": ["DAY", "MONTH", "YEAR"],
     "income_categories": ["工资", "奖金", "..."],
     "expense_categories": ["餐饮", "交通", "..."],
     "money": { "unit": "minor", "minor_units_per_yuan": 100 },
-    "rate_scale": 1000000
+    "rate_scale": 1000000,
+    "business_timezone": "Asia/Shanghai",
+    "business_date": "2026-09-22"
   }
 }
 ```
@@ -146,13 +149,20 @@
 
 `PUT` 字段与创建一致。若账户下已有资产，修改 `owner_member_id` 返回 `40901`。
 
+> 现金/支付宝/微信（`CASH` / `ALIPAY` / `WECHAT`）账户若未提供 `institution_name`，
+> 服务端会自动填入「现金 / 支付宝 / 微信」作为默认机构名。
+
+### `DELETE /api/accounts/{id}`
+
+删除账户。若账户下仍有资产，返回 `40901`（需先删除或转移其下资产），成功返回 `data: null`。
+
 ---
 
 ## 资产 Asset
 
 ### `GET /api/households/{id}/assets?owner_member_id=&account_id=`
 
-返回资产数组，按 `asset_type` 附带对应明细块（`term_deposit` / `fund` / `bond` / `insurance`），
+返回资产数组，按 `asset_type` 附带对应明细块（`term_deposit` / `fund` / `bond` / `bond_fund` / `insurance`），
 不适用时为 `null`：
 
 ```json
@@ -170,6 +180,7 @@
   "term_deposit": null,
   "fund": null,
   "bond": null,
+  "bond_fund": null,
   "insurance": null,
   "created_at": "2026-09-19 10:00:00",
   "updated_at": "2026-09-19 10:00:00"
@@ -192,7 +203,8 @@
 }
 ```
 
-定期存款（明细类型必须与 `asset_type` 一致）：
+定期存款（明细类型必须与 `asset_type` 一致）。`start_date` / `term_value` / `term_unit` 必填，
+`maturity_date` 可留空，由服务端按存期（自然月 / 自然年，目标月无对应日取月末）计算，也可手工修正：
 
 ```json
 {
@@ -201,16 +213,20 @@
   "asset_type": "TERM_DEPOSIT",
   "opening_balance": 10000000,
   "term_deposit": {
-    "principal": 10000000,
     "annual_interest_rate": 18500,
     "start_date": "2026-09-19",
-    "maturity_date": "2029-09-19",
     "term_value": 3,
     "term_unit": "YEAR",
     "auto_rollover": false
   }
 }
 ```
+
+返回体中的 `term_deposit` 还带两个只读派生字段：`status`
+（`ACTIVE` 存续中 / `MATURED` 已到期 / `UNKNOWN`）与 `days_until_maturity`（距到期天数，可空）。
+`auto_rollover=true` 时，每日维护在到期当天（业务日期 `today >= maturity_date`）自动推进到下一存期，
+同步更新 `start_date` 为当前存期起始日；不修改本金（即 `opening_balance`）、当前金额与利率。
+明细不再保存 `principal`，本金以资产的 `opening_balance` 为准（债券同理，名称以 `asset.name` 为准）。
 
 基金：
 
@@ -223,6 +239,37 @@
   "fund": { "fund_code": "000001", "fund_type": "BOND", "lock_end_date": "2027-03-01" }
 }
 ```
+
+债券基金（`asset_type=BOND_FUND`）。`purchase_date` / `holding_mode` / `holding_period_days` 必填；
+`first_redeem_date` / `next_redeem_date` 可留空由服务端计算，也可手工修正（节假日顺延）：
+
+```json
+{
+  "account_id": 1,
+  "name": "某90天滚动持有债券基金",
+  "asset_type": "BOND_FUND",
+  "opening_balance": 10235025,
+  "bond_fund": {
+    "fund_code": "012345",
+    "expected_annual_yield_rate": 35000,
+    "purchase_date": "2026-09-22",
+    "holding_mode": "ROLLING",
+    "holding_period_days": 90
+  }
+}
+```
+
+> 债券基金的本金以资产的「初始金额」为准，名称以 `asset.name` 为准；
+> 明细不再接收 `principal` / `fund_name`（传入会被忽略）。
+
+- `holding_mode=MIN_HOLDING`（持有期）：返回 `first_redeem_date = 购买日期 + 持有周期`，`next_redeem_date` 为 `null`；
+- `holding_mode=ROLLING`（滚动持有）：额外返回 `next_redeem_date`，初值等于 `first_redeem_date`，
+  之后由每日维护按持有周期推进；
+- `expected_annual_yield_rate` 为定点整数（`35000 = 3.5%`），可空；
+- 返回体中的 `bond_fund` 还带两个**只读派生字段**（由后端按业务时区计算，前端直接展示即可）：
+  - `status`：`LOCKED`（锁定）/ `REDEEMABLE`（持有期已满足）/ `REDEEMABLE_TODAY`（今日可赎回）/
+    `PENDING`（滚动型已过赎回日、等待每日维护推进）/ `UNKNOWN`；
+  - `days_until_redeem`：距可赎回日的天数（有符号整数，可空）。
 
 债券 / 保险同理，使用 `bond` / `insurance` 块。
 
@@ -257,9 +304,16 @@
 ```json
 {
   "detail_type": "FUND",
-  "fund": { "fund_code": "000001", "fund_name": "某债券基金" }
+  "fund": { "fund_code": "000001", "fund_type": "BOND" }
 }
 ```
+
+`detail_type=BOND_FUND` 时使用 `bond_fund` 块，字段与创建一致。编辑时若不传
+`next_redeem_date`，服务端会沿用数据库中已被每日维护推进的值，不会重置回首期。
+
+### `DELETE /api/assets/{id}`
+
+删除资产，成功返回 `data: null`。其名下全部流水与明细块会级联删除，不可恢复。
 
 ---
 
@@ -331,11 +385,18 @@
 
 返回单条流水。
 
+### `DELETE /api/transactions/{id}`
+
+删除流水并回滚资产余额，返回 `{"deleted": 1}`。若该流水属于某次转账
+（`transfer_group_id` 非空），会同组删除配对的两条，返回 `{"deleted": 2}`。
+
 ---
 
 ## 统计 Statistics
 
 ### `GET /api/households/{id}/statistics/overview?year=2026&month=9`
+
+`year` / `month` 缺省时取后端业务日期的当前年月；统计区间按业务时区边界计算。
 
 ```json
 {
@@ -353,6 +414,9 @@
 
 ### `GET /api/households/{id}/statistics/period?from=2026-09-01 00:00:00&to=2026-09-30 23:59:59&owner_member_id=1`
 
+`from` / `to` 按业务时区（`business_timezone`）本地时间解释，后端换算成 UTC 后匹配
+以 UTC 存储的 `transaction_time`；返回的 `from` / `to` 原样回显。
+
 ```json
 {
   "from": "2026-09-01 00:00:00",
@@ -364,6 +428,17 @@
   "income_categories": [ { "category": "工资", "amount": 1000000 } ],
   "expense_categories": [ { "category": "餐饮", "amount": 50000 } ]
 }
+```
+
+### `GET /api/households/{id}/statistics/monthly?months=6`
+
+近 N 个月收支趋势（`months` 缺省 6，范围 1..36）。按月升序返回，缺月补零：
+
+```json
+[
+  { "month": "2026-04", "income": 0, "expense": 0, "balance": 0 },
+  { "month": "2026-05", "income": 1000000, "expense": 80000, "balance": 920000 }
+]
 ```
 
 ---

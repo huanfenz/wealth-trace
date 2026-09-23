@@ -10,6 +10,7 @@
 #include "model/enums.hpp"
 #include "utils/money.hpp"
 #include "utils/rate.hpp"
+#include "utils/time_util.hpp"
 
 namespace wt {
 
@@ -23,8 +24,8 @@ void MetaController::register_routes(crow::SimpleApp& app) {
       data["member_statuses"] = {"ACTIVE", "INACTIVE"};
       data["account_types"] = {"BANK",     "ALIPAY",   "WECHAT", "CASH",
                                "SECURITIES", "INSURANCE", "OTHER"};
-      data["asset_types"] = {"CASH",     "TERM_DEPOSIT", "FUND", "BOND",
-                             "INSURANCE", "LIABILITY",    "OTHER"};
+      data["asset_types"] = {"CASH",     "TERM_DEPOSIT", "FUND",       "BOND",
+                             "BOND_FUND", "INSURANCE",    "LIABILITY",  "OTHER"};
       data["asset_statuses"] = {"ACTIVE", "CLOSED"};
       data["transaction_types"] = {"INCOME", "EXPENSE", "TRANSFER_IN", "TRANSFER_OUT",
                                    "ADJUSTMENT"};
@@ -34,6 +35,9 @@ void MetaController::register_routes(crow::SimpleApp& app) {
       data["expense_categories"] = categories_.expense;
       data["money"] = {{"unit", "minor"}, {"minor_units_per_yuan", money::kMinorUnitsPerYuan}};
       data["rate_scale"] = rate::kScale;
+      // 业务时区与业务日期：前端据此展示/判断日期，避免前后端各自用不同「今天」。
+      data["business_timezone"] = time_util::business_timezone();
+      data["business_date"] = time_util::business_today();
       return data;
     });
   });

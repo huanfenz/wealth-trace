@@ -34,11 +34,11 @@ class DatabaseTest : public ::testing::Test {
   Database database_;
 };
 
-// 验证迁移执行后版本号为 1、应用记录 1 条，且重复执行幂等（不会重复应用）。
+// 验证迁移执行后版本号为 4、应用记录 4 条，且重复执行幂等（不会重复应用）。
 TEST_F(DatabaseTest, MigrationCreatesSchemaAndIsIdempotent) {
   MigrationRunner runner(database_);
-  EXPECT_EQ(runner.current_version(), 1);
-  EXPECT_EQ(runner.applied().size(), 1u);
+  EXPECT_EQ(runner.current_version(), 4);
+  EXPECT_EQ(runner.applied().size(), 4u);
 
   // Running again must not re-apply anything.
   const auto applied_again = runner.run(migrations_dir());
@@ -47,9 +47,10 @@ TEST_F(DatabaseTest, MigrationCreatesSchemaAndIsIdempotent) {
 
 // 验证迁移创建了家庭、成员、账户、资产、各明细表以及交易这几张核心表。
 TEST_F(DatabaseTest, AllCoreTablesExist) {
-  const char* tables[] = {"household",  "household_member", "account",
-                          "asset",      "term_deposit_detail", "fund_detail",
-                          "bond_detail", "insurance_detail", "transaction"};
+  const char* tables[] = {"household",       "household_member",   "account",
+                          "asset",           "term_deposit_detail", "fund_detail",
+                          "bond_detail",     "bond_fund_detail",    "insurance_detail",
+                          "transaction",     "system_state"};
   for (const char* table : tables) {
     Statement statement(
         database_,

@@ -35,10 +35,13 @@
         <el-table-column label="资产" width="160">
           <template #default="{ row }">{{ store.assetName(row.asset_id) }}</template>
         </el-table-column>
-        <el-table-column label="类型" width="90">
+        <el-table-column label="类型" width="110">
           <template #default="{ row }">
-            <el-tag size="small" :type="tagType(row.type)">
-              {{ transactionTypeLabels[row.type as TransactionType] }}
+            <el-tag
+              size="small"
+              :type="row.transfer_group_id !== null ? 'primary' : tagType(row.type)"
+            >
+              {{ typeLabel(row) }}
             </el-tag>
           </template>
         </el-table-column>
@@ -54,6 +57,11 @@
           </template>
         </el-table-column>
         <el-table-column prop="remark" label="备注" show-overflow-tooltip />
+        <el-table-column label="操作" width="80" align="right">
+          <template #default="{ row }">
+            <el-button link type="danger" @click="remove(row)">删除</el-button>
+          </template>
+        </el-table-column>
       </el-table>
       <div class="pager">
         <el-pagination
@@ -115,11 +123,12 @@
 <script setup lang="ts">
 // 职责：展示/新增交易流水；同一弹窗按 kind 复用为收入、支出、转账、调整四种表单并分派到对应接口。
 import { computed, onMounted, reactive, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { Edit, Minus, Plus, Sort } from '@element-plus/icons-vue'
 
 import AmountText from '@/components/AmountText.vue'
 import {
+  deleteTransaction,
   listTransactions,
   recordAdjustment,
   recordExpense,
@@ -206,6 +215,15 @@ function tagType(type: TransactionType): 'success' | 'warning' | 'primary' | 'in
     case 'ADJUSTMENT':
       return 'info'
   }
+}
+
+// 类型文案：转账流水（有 transfer_group_id）统一标注为「转账」并附方向，
+// 便于在收支列表里一眼识别出这是一次转账而非普通收支。
+function typeLabel(transaction: Transaction): string {
+  if (transaction.transfer_group_id !== null) {
+    return transaction.type === 'TRANSFER_OUT' ? '转账·转出' : '转账·转入'
+  }
+  return transactionTypeLabels[transaction.type]
 }
 
 // 按筛选条件与分页参数查询流水，offset 由当前页码换算。
@@ -319,6 +337,31 @@ onMounted(async () => {
   await store.refreshAssets()
   await load()
 })
+
+// 删除流水：删除后后端会回滚资产余额；若为转账则成对删除两条，删除前明确提示。
+async function remove(transaction: Transaction) {
+  const isTransfer = transaction.transfer_group_id !== null
+  const detail = isTransfer
+    ? '该记录属于一次转账，删除后将同时删除与之配对的两条转账记录，并回滚两端资产余额。'
+    : '删除后将回滚该资产余额。'
+  try {
+    await ElMessageBox.confirm(`${detail}此操作不可恢复，确认删除？`, '确认删除', {
+      type: 'warning',
+      confirmButtonText: '确认删除',
+      cancelButtonText: '取消',
+      confirmButtonClass: 'el-button--danger',
+    })
+  } catch {
+    return
+  }
+  try {
+    await deleteTransaction(transaction.id)
+    await Promise.all([load(), store.refreshAssets()])
+    ElMessage.success('已删除')
+  } catch (error) {
+    ElMessage.error((error as Error).message)
+  }
+}
 </script>
 
 <style scoped>

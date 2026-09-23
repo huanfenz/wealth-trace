@@ -32,10 +32,10 @@ constexpr std::pair<std::string_view, AccountType> kAccountTypes[] = {
     {"SECURITIES", AccountType::Securities}, {"INSURANCE", AccountType::Insurance},
     {"OTHER", AccountType::Other}};
 constexpr std::pair<std::string_view, AssetType> kAssetTypes[] = {
-    {"CASH", AssetType::Cash},         {"TERM_DEPOSIT", AssetType::TermDeposit},
-    {"FUND", AssetType::Fund},         {"BOND", AssetType::Bond},
-    {"INSURANCE", AssetType::Insurance}, {"LIABILITY", AssetType::Liability},
-    {"OTHER", AssetType::Other}};
+    {"CASH", AssetType::Cash},           {"TERM_DEPOSIT", AssetType::TermDeposit},
+    {"FUND", AssetType::Fund},           {"BOND", AssetType::Bond},
+    {"BOND_FUND", AssetType::BondFund},  {"INSURANCE", AssetType::Insurance},
+    {"LIABILITY", AssetType::Liability}, {"OTHER", AssetType::Other}};
 constexpr std::pair<std::string_view, AssetStatus> kAssetStatuses[] = {
     {"ACTIVE", AssetStatus::Active}, {"CLOSED", AssetStatus::Closed}};
 constexpr std::pair<std::string_view, TransactionType> kTransactionTypes[] = {
@@ -48,6 +48,8 @@ constexpr std::pair<std::string_view, TransactionStatus> kTransactionStatuses[] 
     {"NORMAL", TransactionStatus::Normal}, {"VOID", TransactionStatus::Void}};
 constexpr std::pair<std::string_view, TermUnit> kTermUnits[] = {
     {"DAY", TermUnit::Day}, {"MONTH", TermUnit::Month}, {"YEAR", TermUnit::Year}};
+constexpr std::pair<std::string_view, HoldingMode> kHoldingModes[] = {
+    {"MIN_HOLDING", HoldingMode::MinHolding}, {"ROLLING", HoldingMode::Rolling}};
 
 }  // namespace
 
@@ -77,6 +79,7 @@ std::string_view to_string(AssetType value) {
     case AssetType::TermDeposit: return "TERM_DEPOSIT";
     case AssetType::Fund: return "FUND";
     case AssetType::Bond: return "BOND";
+    case AssetType::BondFund: return "BOND_FUND";
     case AssetType::Insurance: return "INSURANCE";
     case AssetType::Liability: return "LIABILITY";
     case AssetType::Other: return "OTHER";
@@ -107,6 +110,9 @@ std::string_view to_string(TermUnit value) {
   }
   return "YEAR";
 }
+std::string_view to_string(HoldingMode value) {
+  return value == HoldingMode::Rolling ? "ROLLING" : "MIN_HOLDING";
+}
 
 // 以下 parse_*：把数据库字符串解析回枚举，未知取值统一返回 nullopt。
 std::optional<MemberRole> parse_member_role(std::string_view text) {
@@ -132,6 +138,9 @@ std::optional<TransactionStatus> parse_transaction_status(std::string_view text)
 }
 std::optional<TermUnit> parse_term_unit(std::string_view text) {
   return parse_enum(text, kTermUnits, std::size(kTermUnits));
+}
+std::optional<HoldingMode> parse_holding_mode(std::string_view text) {
+  return parse_enum(text, kHoldingModes, std::size(kHoldingModes));
 }
 
 std::int64_t transaction_delta(TransactionType type, std::int64_t amount) {

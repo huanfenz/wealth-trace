@@ -10,7 +10,7 @@ namespace wt {
 class Database;
 
 // 资产资源的 REST 接口：列表 / 新建（含明细块）/ 查询 / 改元数据 /
-// 改状态 / 改明细。
+// 改状态 / 改明细 / 删除（级联流水与明细）。
 class AssetController {
  public:
   explicit AssetController(Database& database) : service_(database) {}
