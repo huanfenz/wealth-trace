@@ -28,6 +28,23 @@ struct AssetCreateInput {
   std::optional<BondDetail> bond;
   std::optional<BondFundDetail> bond_fund;
   std::optional<InsuranceDetail> insurance;
+  // 添加时维护：为 true 时，创建成功后立即按与每日维护相同的规则推进过期日期
+  // （滚动债基 next_redeem_date / 自动续存定存本期起止日期）。默认 false 保持原样。
+  bool maintain_on_create = false;
+};
+
+// 创建时维护预览：某日期字段将推进的前后值。
+struct CreateMaintenanceChange {
+  std::string field;  // next_redeem_date / start_date / maturity_date
+  std::string before;
+  std::string after;
+};
+
+// 创建时维护预览：是否需要维护，以及各字段的推进前后值（不落库）。
+struct CreateMaintenancePreview {
+  bool required = false;
+  AssetType asset_type = AssetType::Other;
+  std::vector<CreateMaintenanceChange> changes;
 };
 
 // 资产聚合结果：资产本体 + 至多一个明细块（由 asset_type 决定）。
@@ -51,7 +68,11 @@ class AssetService {
   // 创建资产：账户不存在抛 not_found；校验 opening_balance 符号与明细组合，
   // 在事务中同时写入资产与（可选）明细，全成功或全回滚。
   // current_balance 初始化为 opening_balance（此时还没有任何交易）。
+  // maintain_on_create 为 true 时，写入前先按每日维护规则推进过期日期。
   AssetBundle create(std::int64_t household_id, const AssetCreateInput& input);
+
+  // 预览「添加时维护」将产生的日期推进；不依赖账户、不落库，供前端弹框确认。
+  CreateMaintenancePreview preview_create_maintenance(const AssetCreateInput& input) const;
 
   // 获取资产及其明细聚合；资产不存在抛 not_found。
   AssetBundle get_bundle(std::int64_t id);

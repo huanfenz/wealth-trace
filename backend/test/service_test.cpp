@@ -549,6 +549,63 @@ TEST_F(ServiceFixture, BondFundRollingKeepsTodaysRedeemDate) {
   EXPECT_EQ(after.bond_fund->next_redeem_date.value_or(""), today);
 }
 
+// 添加时维护：创建滚动债基时带 maintain_on_create，过期赎回日立即推进到未来。
+TEST_F(ServiceFixture, BondFundCreateMaintainsPastRedeemDate) {
+  const std::string today = time_util::business_today();
+  AssetService assets(database_);
+  AssetCreateInput input;
+  input.account_id = account_.id;
+  input.name = "债券基金";
+  input.asset_type = AssetType::BondFund;
+  input.opening_balance = 10000000;
+  input.maintain_on_create = true;
+  BondFundDetail detail;
+  detail.purchase_date = time_util::add_days(today, -200);
+  detail.holding_mode = HoldingMode::Rolling;
+  detail.holding_period_days = 90;
+  input.bond_fund = detail;
+
+  const auto bundle = assets.create(household_.id, input);
+  ASSERT_TRUE(bundle.bond_fund.has_value());
+  ASSERT_TRUE(bundle.bond_fund->next_redeem_date.has_value());
+  EXPECT_GE(*bundle.bond_fund->next_redeem_date, today);
+}
+
+// 不带 maintain_on_create 时保持原样，由每日维护或手动维护后续处理。
+TEST_F(ServiceFixture, BondFundCreateWithoutMaintainKeepsPastRedeemDate) {
+  const std::string today = time_util::business_today();
+  const AssetBundle bundle = make_bond_fund(database_, household_.id, account_.id,
+                                            time_util::add_days(today, -200),
+                                            HoldingMode::Rolling, 90);
+  ASSERT_TRUE(bundle.bond_fund->next_redeem_date.has_value());
+  EXPECT_LT(*bundle.bond_fund->next_redeem_date, today);
+}
+
+// 添加时维护预览：过期滚动债基返回 required 与推进前后值；未过期则不需要维护。
+TEST_F(ServiceFixture, BondFundCreateMaintenancePreview) {
+  const std::string today = time_util::business_today();
+  AssetService assets(database_);
+
+  AssetCreateInput past;
+  past.asset_type = AssetType::BondFund;
+  BondFundDetail detail;
+  detail.purchase_date = time_util::add_days(today, -200);
+  detail.holding_mode = HoldingMode::Rolling;
+  detail.holding_period_days = 90;
+  past.bond_fund = detail;
+  const auto preview = assets.preview_create_maintenance(past);
+  EXPECT_TRUE(preview.required);
+  ASSERT_EQ(preview.changes.size(), 1u);
+  EXPECT_EQ(preview.changes[0].field, "next_redeem_date");
+  EXPECT_GE(preview.changes[0].after, today);
+
+  AssetCreateInput future;
+  future.asset_type = AssetType::BondFund;
+  detail.purchase_date = today;  // 首期赎回日在未来，无需维护
+  future.bond_fund = detail;
+  EXPECT_FALSE(assets.preview_create_maintenance(future).required);
+}
+
 // 每日维护当天只执行一次，并在 system_state 记录最近执行日期。
 TEST_F(ServiceFixture, DailyMaintenanceRunsOncePerDay) {
   DailyAssetMaintenanceService maintenance(database_);
@@ -698,6 +755,74 @@ TEST_F(ServiceFixture, TermDepositNoAutoRolloverKeepsMaturity) {
   const auto after = assets.get_bundle(bundle.asset.id);
   EXPECT_EQ(after.term_deposit->maturity_date.value_or(""), today);
   EXPECT_EQ(after.term_deposit->start_date.value_or(""), time_util::add_days(today, -1));
+}
+
+// 添加时维护：自动续存定存创建时一次性推进到当前存期，起息日同步为当前存期起点。
+TEST_F(ServiceFixture, TermDepositCreateMaintainsAutoRollover) {
+  const std::string today = time_util::business_today();
+  AssetService assets(database_);
+  AssetCreateInput input;
+  input.account_id = account_.id;
+  input.name = "定期存款";
+  input.asset_type = AssetType::TermDeposit;
+  input.opening_balance = 10000000;
+  input.maintain_on_create = true;
+  TermDepositDetail detail;
+  detail.start_date = "2020-01-01";
+  detail.term_value = 1;
+  detail.term_unit = TermUnit::Year;
+  detail.auto_rollover = true;
+  input.term_deposit = detail;
+
+  const auto bundle = assets.create(household_.id, input);
+  ASSERT_TRUE(bundle.term_deposit.has_value());
+  ASSERT_TRUE(bundle.term_deposit->maturity_date.has_value());
+  EXPECT_GT(*bundle.term_deposit->maturity_date, today);
+  EXPECT_LE(bundle.term_deposit->start_date.value_or(""), today);
+  EXPECT_EQ(
+      time_util::add_term(*bundle.term_deposit->start_date, 1, TermUnit::Year),
+      *bundle.term_deposit->maturity_date);
+}
+
+// 维护预览：列出将要推进的资产变更，且不修改任何数据。
+TEST_F(ServiceFixture, MaintenancePreviewListsChangesWithoutPersisting) {
+  const std::string today = time_util::business_today();
+  const AssetBundle fund = make_bond_fund(database_, household_.id, account_.id,
+                                          time_util::add_days(today, -200),
+                                          HoldingMode::Rolling, 90);
+
+  DailyAssetMaintenanceService maintenance(database_);
+  const auto plan = maintenance.preview();
+  EXPECT_TRUE(plan.required);
+  ASSERT_EQ(plan.changes.size(), 1u);
+  EXPECT_EQ(plan.changes[0].asset_id, fund.asset.id);
+  EXPECT_EQ(plan.changes[0].asset_type, "BOND_FUND");
+  EXPECT_EQ(plan.changes[0].field, "next_redeem_date");
+  EXPECT_GE(plan.changes[0].after, today);
+
+  // 预览不落库：数据库中仍是原值。
+  AssetService assets(database_);
+  const auto unchanged = assets.get_bundle(fund.asset.id);
+  EXPECT_LT(*unchanged.bond_fund->next_redeem_date, today);
+}
+
+// 手动维护 run 返回各类被推进的条数，且幂等。
+TEST_F(ServiceFixture, MaintenanceRunReportsCounts) {
+  const std::string today = time_util::business_today();
+  make_bond_fund(database_, household_.id, account_.id, time_util::add_days(today, -200),
+                 HoldingMode::Rolling, 90);
+  make_term_deposit(database_, household_.id, account_.id, "2020-01-01", 1,
+                    TermUnit::Year, true);
+
+  DailyAssetMaintenanceService maintenance(database_);
+  const auto result = maintenance.run();
+  EXPECT_EQ(result.bond_funds, 1);
+  EXPECT_EQ(result.term_deposits, 1);
+
+  // 再次执行无变更。
+  const auto again = maintenance.run();
+  EXPECT_EQ(again.bond_funds, 0);
+  EXPECT_EQ(again.term_deposits, 0);
 }
 
 }  // namespace

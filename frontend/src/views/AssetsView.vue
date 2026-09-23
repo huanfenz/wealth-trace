@@ -3,6 +3,7 @@
   <div>
     <div class="toolbar">
       <el-button type="primary" :icon="Plus" @click="openCreate">新增资产</el-button>
+      <el-button :icon="Refresh" :loading="maintaining" @click="runMaintenance">手动维护</el-button>
       <el-select v-model="filterMember" clearable placeholder="按成员" style="width: 150px" @change="load">
         <el-option v-for="m in store.members" :key="m.id" :label="m.name" :value="m.id" />
       </el-select>
@@ -236,13 +237,16 @@
 // 职责：展示/维护资产列表；弹窗表单按 asset_type 切换明细块，负责「元↔分」「百分数↔定点利率」换算后提交。
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus } from '@element-plus/icons-vue'
+import { Plus, Refresh } from '@element-plus/icons-vue'
 
 import AmountText from '@/components/AmountText.vue'
 import {
   createAsset,
   deleteAsset,
+  getMaintenancePreview,
   listAssets,
+  previewCreateMaintenance,
+  runDailyMaintenance,
   updateAsset,
   updateAssetDetail,
   updateAssetStatus,
@@ -256,11 +260,19 @@ const store = useAppStore()
 const assets = ref<Asset[]>([])       // 当前筛选条件下的资产列表
 const loading = ref(false)            // 列表加载中
 const saving = ref(false)             // 表单提交中
+const maintaining = ref(false)        // 手动维护请求中
 const dialogVisible = ref(false)      // 弹窗显隐
 const editing = ref<Asset | null>(null) // 当前编辑对象，null 表示新增
 const row = ref<Asset | null>(null)   // 当前编辑行，用于判断初始金额是否可改
 const filterMember = ref<number | undefined>(undefined)  // 按成员筛选
 const filterAccount = ref<number | undefined>(undefined) // 按账户筛选
+
+// 维护涉及的日期字段中文名，用于「添加时维护 / 手动维护」确认弹框展示。
+const maintenanceFieldLabels: Record<string, string> = {
+  next_redeem_date: '下一赎回日',
+  start_date: '起息日',
+  maturity_date: '到期日',
+}
 
 // 资产基本信息表单（金额以「元」字符串编辑，提交时再换算为「分」）。
 const form = reactive({
@@ -619,6 +631,14 @@ async function save() {
       if (detailPayload && detailKey[form.asset_type]) {
         payload[detailKey[form.asset_type] as string] = detailPayload
       }
+      // 添加时维护：滚动债基 / 自动续存定存若日期已过期，先预览推进结果并让用户确认；
+      // 用户取消则放弃本次新增，保持弹窗让用户修改。
+      if (
+        (form.asset_type === 'BOND_FUND' || form.asset_type === 'TERM_DEPOSIT') &&
+        !(await confirmCreateMaintenance(payload))
+      ) {
+        return
+      }
       await createAsset(store.householdId, payload)
     }
     dialogVisible.value = false
@@ -628,6 +648,80 @@ async function save() {
     ElMessage.error((error as Error).message)
   } finally {
     saving.value = false
+  }
+}
+
+// 组装维护变更的展示文案：字段中文名 + 推进前后值，多行用 <br/> 拼接。
+function maintenanceLines(
+  changes: { field: string; before: string; after: string; asset_name?: string }[],
+  withAssetName = false,
+): string {
+  return changes
+    .map((c) => {
+      const label = maintenanceFieldLabels[c.field] ?? c.field
+      const prefix = withAssetName && c.asset_name ? `${c.asset_name} · ` : ''
+      return `${prefix}${label}：${c.before} → ${c.after}`
+    })
+    .join('<br/>')
+}
+
+// 添加时维护：调用后端预览是否会产生日期推进；需要时弹框让用户确认。
+// 返回 true 表示可以继续保存（无需维护或用户确认推进），false 表示放弃本次新增。
+async function confirmCreateMaintenance(payload: Record<string, unknown>): Promise<boolean> {
+  const preview = await previewCreateMaintenance(store.householdId, payload)
+  if (!preview.required) {
+    return true
+  }
+  try {
+    await ElMessageBox.confirm(
+      `该资产的时间已过期，保存时将按每日维护规则推进：<br/>${maintenanceLines(preview.changes)}<br/>确认推进并保存？`,
+      '添加时维护',
+      {
+        type: 'warning',
+        confirmButtonText: '推进并保存',
+        cancelButtonText: '取消',
+        dangerouslyUseHTMLString: true,
+      },
+    )
+  } catch {
+    return false // 用户取消，放弃本次新增
+  }
+  payload.maintain_on_create = true
+  return true
+}
+
+// 手动维护：先预览将产生的变更，确认后强制执行一次每日维护。
+async function runMaintenance() {
+  maintaining.value = true
+  try {
+    const preview = await getMaintenancePreview()
+    if (!preview.required) {
+      ElMessage.info('当前没有需要维护的资产')
+      return
+    }
+    try {
+      await ElMessageBox.confirm(
+        `将按每日维护规则推进以下资产的时间状态：<br/>${maintenanceLines(preview.changes, true)}<br/>确认执行维护？`,
+        '手动维护',
+        {
+          type: 'warning',
+          confirmButtonText: '执行维护',
+          cancelButtonText: '取消',
+          dangerouslyUseHTMLString: true,
+        },
+      )
+    } catch {
+      return // 用户取消
+    }
+    const result = await runDailyMaintenance()
+    await load()
+    ElMessage.success(
+      `维护完成：滚动债基 ${result.bond_funds} 项，定期存款 ${result.term_deposits} 项`,
+    )
+  } catch (error) {
+    ElMessage.error((error as Error).message)
+  } finally {
+    maintaining.value = false
   }
 }
 

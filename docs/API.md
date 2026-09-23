@@ -271,6 +271,11 @@
     `PENDING`（滚动型已过赎回日、等待每日维护推进）/ `UNKNOWN`；
   - `days_until_redeem`：距可赎回日的天数（有符号整数，可空）。
 
+> 添加时维护：创建滚动债基（`ROLLING`）或自动续存定存（`auto_rollover=true`）时，若按上述规则
+> 算出的 `next_redeem_date` / `maturity_date` 已过期，可传 `maintain_on_create: true`，
+> 服务端会在写入前按与每日维护相同的规则把日期推进到当前周期，避免「新建即 `PENDING`」。
+> 前端可先调用下面的 `POST .../assets/maintenance-preview` 预览将要产生的推进，并向用户确认。
+
 债券 / 保险同理，使用 `bond` / `insurance` 块。
 
 负债（`opening_balance` 必须 ≤ 0）：
@@ -278,6 +283,25 @@
 ```json
 { "account_id": 2, "name": "信用卡", "asset_type": "LIABILITY", "opening_balance": 0 }
 ```
+
+### `POST /api/households/{id}/assets/maintenance-preview`
+
+创建前的「添加时维护」预览：请求体与 `POST /api/households/{id}/assets` 相同（至少含
+`asset_type` 与对应明细块），只读取入参、不落库、不校验账户。返回是否需要维护及推进前后值：
+
+```json
+{
+  "required": true,
+  "asset_type": "BOND_FUND",
+  "changes": [
+    { "field": "next_redeem_date", "before": "2026-06-05", "after": "2026-12-02" }
+  ]
+}
+```
+
+`field` 取值：`next_redeem_date`（滚动债基）或 `start_date` / `maturity_date`（自动续存定存）。
+前端在创建前调用本接口，`required=true` 时弹框让用户确认，确认后再带
+`maintain_on_create: true` 提交创建；用户取消则放弃本次新增。
 
 ### `GET /api/assets/{id}` / `PUT /api/assets/{id}`
 
@@ -389,6 +413,46 @@
 
 删除流水并回滚资产余额，返回 `{"deleted": 1}`。若该流水属于某次转账
 （`transfer_group_id` 非空），会同组删除配对的两条，返回 `{"deleted": 2}`。
+
+---
+
+## 维护 Maintenance
+
+每日维护让「与时间相关的状态」收敛到当前业务日期应有的状态（滚动债基下一赎回日、
+自动续存定存的本期起止日期）。除启动补跑与每天 0 点调度外，还支持手动预览与触发。
+
+### `GET /api/maintenance/preview`
+
+预览按当前业务日期执行维护将产生的变更，**不落库**：
+
+```json
+{
+  "business_date": "2026-09-23",
+  "required": true,
+  "changes": [
+    {
+      "asset_id": 1,
+      "asset_name": "滚动债基A",
+      "asset_type": "BOND_FUND",
+      "field": "next_redeem_date",
+      "before": "2026-06-05",
+      "after": "2026-12-02"
+    }
+  ]
+}
+```
+
+### `POST /api/maintenance/run`
+
+强制执行一次每日维护（幂等），返回各类被推进的资产条数：
+
+```json
+{ "business_date": "2026-09-23", "bond_funds": 1, "term_deposits": 1 }
+```
+
+维护规则与启动补跑、零点调度完全一致（滚动债基 `today > next_redeem_date` 才推进；
+自动续存定存 `today >= maturity_date` 即续期），整个任务在一个事务内完成并更新
+`system_state.daily_maintenance_last_run`。
 
 ---
 

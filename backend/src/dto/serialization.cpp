@@ -232,6 +232,42 @@ nlohmann::json to_json(const AssetBundle& bundle) {
   return json;
 }
 
+// 创建时维护预览：required 是否需要维护，changes 为各字段推进前后值。
+nlohmann::json to_json(const CreateMaintenancePreview& preview) {
+  nlohmann::json changes = nlohmann::json::array();
+  for (const auto& change : preview.changes) {
+    changes.push_back({{"field", change.field},
+                       {"before", change.before},
+                       {"after", change.after}});
+  }
+  return {{"required", preview.required},
+          {"asset_type", std::string(to_string(preview.asset_type))},
+          {"changes", changes}};
+}
+
+// 每日维护预览计划：业务日期 + 是否需要维护 + 全部变更（含资产 id/名称/类型）。
+nlohmann::json to_json(const MaintenancePlan& plan) {
+  nlohmann::json changes = nlohmann::json::array();
+  for (const auto& change : plan.changes) {
+    changes.push_back({{"asset_id", change.asset_id},
+                       {"asset_name", change.asset_name},
+                       {"asset_type", change.asset_type},
+                       {"field", change.field},
+                       {"before", change.before},
+                       {"after", change.after}});
+  }
+  return {{"business_date", plan.business_date},
+          {"required", plan.required},
+          {"changes", changes}};
+}
+
+// 每日维护执行结果：业务日期 + 各类被推进的资产条数。
+nlohmann::json to_json(const MaintenanceResult& result) {
+  return {{"business_date", result.business_date},
+          {"bond_funds", result.bond_funds},
+          {"term_deposits", result.term_deposits}};
+}
+
 // 交易流水：amount 为分；category 分类可选；transfer_group_id 关联同一笔转账的
 // 两条流水；balance_before/after 为交易前后资产余额（分，可为空）；
 // transaction_time 为 UTC "YYYY-MM-DD HH:MM:SS"；status 为枚举名。

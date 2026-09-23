@@ -220,6 +220,44 @@ export interface MonthlyStat {
   balance: number // 结余（分）
 }
 
+/** 创建资产时的「添加时维护」单条变更：某日期字段推进前后值。 */
+export interface CreateMaintenanceChange {
+  field: string // next_redeem_date / start_date / maturity_date
+  before: string
+  after: string
+}
+
+/** 创建资产时的「添加时维护」预览结果。 */
+export interface CreateMaintenancePreview {
+  required: boolean // 是否需要维护
+  asset_type: AssetType
+  changes: CreateMaintenanceChange[]
+}
+
+/** 每日维护单条变更：某个已有资产的日期推进（含资产信息，便于展示）。 */
+export interface MaintenanceChange {
+  asset_id: number
+  asset_name: string // 资产名称
+  asset_type: AssetType
+  field: string // next_redeem_date / start_date / maturity_date
+  before: string
+  after: string
+}
+
+/** 每日维护预览计划：按当前业务日期推导，不落库。 */
+export interface MaintenancePlan {
+  business_date: string // 业务日期 YYYY-MM-DD
+  required: boolean
+  changes: MaintenanceChange[]
+}
+
+/** 每日维护执行结果：各类被推进的资产条数。 */
+export interface MaintenanceResult {
+  business_date: string
+  bond_funds: number // 推进的滚动债基数
+  term_deposits: number // 续期的自动续存定存数
+}
+
 /** 分页结果包装。 */
 export interface Paged<T> {
   total: number // 总条数

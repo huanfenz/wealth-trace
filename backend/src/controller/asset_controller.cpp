@@ -191,7 +191,27 @@ void AssetController::register_routes(crow::SimpleApp& app) {
           input.bond = parse_bond(body);
           input.bond_fund = parse_bond_fund(body);
           input.insurance = parse_insurance(body);
+          // 添加时维护：前端预览并确认后置为 true，创建时推进过期日期。
+          input.maintain_on_create = dto::optional_bool(body, "maintain_on_create", false);
           return dto::to_json(service_.create(id, input));
+        });
+      });
+
+  // POST /api/households/<int>/assets/maintenance-preview：创建前的「添加时维护」
+  // 预览；只读取入参，不落库、不依赖账户，返回是否需要维护及推进前后值。
+  CROW_ROUTE(app, "/api/households/<int>/assets/maintenance-preview")
+      .methods("POST"_method)([this](const crow::request& request, int id) {
+        (void)id;
+        return http::handle([this, &request] {
+          const auto body = dto::parse_object(request.body);
+          AssetCreateInput input;
+          input.asset_type = require_asset_type(body);
+          input.term_deposit = parse_term_deposit(body);
+          input.fund = parse_fund(body);
+          input.bond = parse_bond(body);
+          input.bond_fund = parse_bond_fund(body);
+          input.insurance = parse_insurance(body);
+          return dto::to_json(service_.preview_create_maintenance(input));
         });
       });
 

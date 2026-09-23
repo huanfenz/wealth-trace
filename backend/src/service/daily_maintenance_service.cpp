@@ -1,13 +1,14 @@
-// 每日资产维护服务实现：滚动债基赎回日推进 + 每日维护游标。
+// 每日资产维护服务实现：滚动债基赎回日推进 + 自动续存定存续期 + 每日维护游标。
 #include "service/daily_maintenance_service.hpp"
 
 #include <optional>
 #include <string>
+#include <utility>
 
 #include "common/logging.hpp"
 #include "database/database.hpp"
 #include "database/transaction.hpp"
-#include "utils/term_date.hpp"
+#include "utils/maintenance_rules.hpp"
 #include "utils/time_util.hpp"
 
 namespace wt {
@@ -31,40 +32,92 @@ bool DailyAssetMaintenanceService::run_if_due() {
   return true;
 }
 
-void DailyAssetMaintenanceService::run() {
+MaintenanceResult DailyAssetMaintenanceService::run() {
   std::scoped_lock lock(database_.mutex());
   const std::string today = time_util::business_today();
   // 更新与 last_run 写入必须同属一个事务：任一步失败都整体回滚，
   // last_run 保持旧值，下一次启动/调度可以重跑。
   TransactionGuard transaction(database_);
-  const std::int64_t bond_funds = update_bond_funds(today);
-  const std::int64_t term_deposits = update_term_deposits(today);
+  MaintenanceResult result;
+  result.business_date = today;
+  result.bond_funds = update_bond_funds(today);
+  result.term_deposits = update_term_deposits(today);
   states_.set(kLastRunKey, today);
   transaction.commit();
   log_info("daily maintenance done for " + today + ": bond funds advanced " +
-           std::to_string(bond_funds) + ", term deposits rolled " +
-           std::to_string(term_deposits));
+           std::to_string(result.bond_funds) + ", term deposits rolled " +
+           std::to_string(result.term_deposits));
+  return result;
 }
 
-std::int64_t DailyAssetMaintenanceService::update_bond_funds(const std::string& today) {
-  std::int64_t updated = 0;
+MaintenancePlan DailyAssetMaintenanceService::preview() {
+  std::scoped_lock lock(database_.mutex());
+  const std::string today = time_util::business_today();
+  MaintenancePlan plan;
+  plan.business_date = today;
+
   for (const auto& fund : assets_.list_rolling_bond_funds()) {
     // 滚动型正常都有 next_redeem_date；缺失数据直接跳过，不臆造。
     if (!fund.next_redeem_date.has_value()) {
       continue;
     }
-    std::string next = *fund.next_redeem_date;
-    bool changed = false;
-    // 关键：必须用 today > next。today == next 代表今天仍是有效赎回日，
-    // 若用 >= 会在赎回日 0 点直接滚入下一期，用户就看不到「今日可赎回」。
-    while (today > next) {
-      next = time_util::add_days(next, fund.holding_period_days);
-      changed = true;
+    const auto advanced = maintenance_rules::advance_bond_fund_next(
+        *fund.next_redeem_date, fund.holding_period_days, today);
+    if (!advanced.has_value()) {
+      continue;
     }
-    if (changed) {
-      assets_.update_bond_fund_next_redeem_date(fund.asset_id, next);
-      ++updated;
+    MaintenanceChange change;
+    change.asset_id = fund.asset_id;
+    change.asset_name = asset_name(fund.asset_id);
+    change.asset_type = "BOND_FUND";
+    change.field = "next_redeem_date";
+    change.before = *fund.next_redeem_date;
+    change.after = *advanced;
+    plan.changes.push_back(std::move(change));
+  }
+
+  for (const auto& deposit : assets_.list_auto_rollover_term_deposits()) {
+    // 缺少必要字段的历史/异常数据直接跳过，不臆造。
+    if (!deposit.maturity_date.has_value() || !deposit.term_value.has_value() ||
+        !deposit.term_unit.has_value() || *deposit.term_value <= 0) {
+      continue;
     }
+    const auto advanced = maintenance_rules::advance_term_period(
+        *deposit.maturity_date, *deposit.term_value, *deposit.term_unit, today);
+    if (!advanced.has_value()) {
+      continue;
+    }
+    const std::string start = deposit.start_date.value_or(*deposit.maturity_date);
+    const std::string name = asset_name(deposit.asset_id);
+    plan.changes.push_back(MaintenanceChange{deposit.asset_id, name, "TERM_DEPOSIT",
+                                             "start_date", start, advanced->start});
+    plan.changes.push_back(MaintenanceChange{deposit.asset_id, name, "TERM_DEPOSIT",
+                                             "maturity_date", *deposit.maturity_date,
+                                             advanced->maturity});
+  }
+
+  plan.required = !plan.changes.empty();
+  return plan;
+}
+
+std::string DailyAssetMaintenanceService::asset_name(std::int64_t asset_id) {
+  const auto asset = assets_.find_by_id(asset_id);
+  return asset.has_value() ? asset->name : std::string();
+}
+
+std::int64_t DailyAssetMaintenanceService::update_bond_funds(const std::string& today) {
+  std::int64_t updated = 0;
+  for (const auto& fund : assets_.list_rolling_bond_funds()) {
+    if (!fund.next_redeem_date.has_value()) {
+      continue;
+    }
+    const auto advanced = maintenance_rules::advance_bond_fund_next(
+        *fund.next_redeem_date, fund.holding_period_days, today);
+    if (!advanced.has_value()) {
+      continue;
+    }
+    assets_.update_bond_fund_next_redeem_date(fund.asset_id, *advanced);
+    ++updated;
   }
   return updated;
 }
@@ -73,25 +126,18 @@ std::int64_t DailyAssetMaintenanceService::update_term_deposits(
     const std::string& today) {
   std::int64_t updated = 0;
   for (const auto& deposit : assets_.list_auto_rollover_term_deposits()) {
-    // 缺少必要字段的历史/异常数据直接跳过，不臆造。
     if (!deposit.maturity_date.has_value() || !deposit.term_value.has_value() ||
         !deposit.term_unit.has_value() || *deposit.term_value <= 0) {
       continue;
     }
-    std::string start = deposit.start_date.value_or(*deposit.maturity_date);
-    std::string maturity = *deposit.maturity_date;
-    bool changed = false;
-    // 到期即续存：与滚动债基的 today > next 不同，自动续存用 today >= maturity，
-    // 到期当天即进入下一存期。旧 maturity 作为新一期起始日，避免停机导致周期漂移。
-    while (today >= maturity) {
-      start = maturity;
-      maturity = time_util::add_term(maturity, *deposit.term_value, *deposit.term_unit);
-      changed = true;
+    const auto advanced = maintenance_rules::advance_term_period(
+        *deposit.maturity_date, *deposit.term_value, *deposit.term_unit, today);
+    if (!advanced.has_value()) {
+      continue;
     }
-    if (changed) {
-      assets_.update_term_deposit_period(deposit.asset_id, start, maturity);
-      ++updated;
-    }
+    assets_.update_term_deposit_period(deposit.asset_id, advanced->start,
+                                       advanced->maturity);
+    ++updated;
   }
   return updated;
 }

@@ -10,6 +10,7 @@
 #include "repository/statistics_repository.hpp"
 #include "service/account_service.hpp"
 #include "service/asset_service.hpp"
+#include "service/daily_maintenance_service.hpp"
 #include "service/statistics_service.hpp"
 #include "service/transaction_service.hpp"
 
@@ -37,6 +38,12 @@ nlohmann::json to_json(const BondFundDetail& detail);
 nlohmann::json to_json(const InsuranceDetail& detail);
 // 资产聚合包：资产基础信息 + 四个明细块（不适用的明细块为 null）。
 nlohmann::json to_json(const AssetBundle& bundle);
+// 创建资产时的「添加时维护」预览（不落库）。
+nlohmann::json to_json(const CreateMaintenancePreview& preview);
+// 每日维护预览计划（不落库）。
+nlohmann::json to_json(const MaintenancePlan& plan);
+// 每日维护执行结果（各类被推进的资产数）。
+nlohmann::json to_json(const MaintenanceResult& result);
 // 交易流水（金额为分，收支方向由 type 决定；时间 UTC 字符串）。
 nlohmann::json to_json(const Transaction& transaction);
 // 转账结果：同时返回转出与转入两条流水。

@@ -3,8 +3,11 @@ import { del, get, post, put } from './http'
 import type {
   Account,
   Asset,
+  CreateMaintenancePreview,
   Household,
   HouseholdOverview,
+  MaintenancePlan,
+  MaintenanceResult,
   Member,
   Meta,
   MonthlyStat,
@@ -122,6 +125,17 @@ export function createAsset(
   return post<Asset>(`/households/${householdId}/assets`, body)
 }
 
+/** 预览新建资产时的「添加时维护」：返回是否需要推进及前后值（不落库）。 */
+export function previewCreateMaintenance(
+  householdId: number,
+  body: Record<string, unknown>,
+): Promise<CreateMaintenancePreview> {
+  return post<CreateMaintenancePreview>(
+    `/households/${householdId}/assets/maintenance-preview`,
+    body,
+  )
+}
+
 /** 更新资产基本信息。 */
 export function updateAsset(id: number, body: Record<string, unknown>): Promise<Asset> {
   return put<Asset>(`/assets/${id}`, body)
@@ -143,6 +157,18 @@ export function updateAssetDetail(
 /** 删除资产；其名下全部流水与明细块会被级联删除。 */
 export function deleteAsset(id: number): Promise<null> {
   return del<null>(`/assets/${id}`)
+}
+
+// --- maintenance（每日维护） ----------------------------------------------
+
+/** 预览每日维护将产生的变更（滚动债基赎回日 / 自动续存存期推进），不落库。 */
+export function getMaintenancePreview(): Promise<MaintenancePlan> {
+  return get<MaintenancePlan>('/maintenance/preview')
+}
+
+/** 强制执行一次每日维护（幂等），返回各类被推进的资产条数。 */
+export function runDailyMaintenance(): Promise<MaintenanceResult> {
+  return post<MaintenanceResult>('/maintenance/run')
 }
 
 // --- transactions（收支与转账） ------------------------------------------

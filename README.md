@@ -280,6 +280,7 @@ WEALTH_TRACE_CONFIG=/path/to/config.json ./build/backend/wealth-trace
 | GET/POST | `/api/households/{id}/accounts` | 账户列表（含余额）/创建 |
 | GET/PUT/DELETE | `/api/accounts/{id}` | 账户详情（含余额）/更新/删除 |
 | GET/POST | `/api/households/{id}/assets` | 资产列表/创建（可带明细） |
+| POST | `/api/households/{id}/assets/maintenance-preview` | 创建资产时的「添加时维护」预览 |
 | GET/PUT | `/api/assets/{id}` | 资产详情/更新 |
 | DELETE | `/api/assets/{id}` | 删除资产（级联删除流水与明细） |
 | PUT | `/api/assets/{id}/status` | 启用/关闭资产 |
@@ -294,6 +295,8 @@ WEALTH_TRACE_CONFIG=/path/to/config.json ./build/backend/wealth-trace
 | GET | `/api/households/{id}/statistics/overview` | 家庭总览 |
 | GET | `/api/households/{id}/statistics/period` | 区间收支统计 |
 | GET | `/api/households/{id}/statistics/monthly` | 近 N 个月收支趋势 |
+| GET | `/api/maintenance/preview` | 每日维护变更预览（不落库） |
+| POST | `/api/maintenance/run` | 手动执行每日维护（幂等） |
 
 ---
 
@@ -308,6 +311,10 @@ WEALTH_TRACE_CONFIG=/path/to/config.json ./build/backend/wealth-trace
 滚动型的下一赎回日由每日维护推进（`today > next_redeem_date` 才滚动，当天仍是有效赎回日）。
 持有状态不落库，由后端按业务时区（默认 `Asia/Shanghai`）实时推导并随资产 JSON 返回
 （`status` / `days_until_redeem`）。详见 [`docs/设计问题说明.md`](./docs/设计问题说明.md) 第 14–16 节。
+
+维护时机共有四处，规则统一（见 [`docs/设计问题说明.md`](./docs/设计问题说明.md) 第 19 节）：
+启动补跑、每天 0 点调度、新增资产时的「添加时维护」（`maintain_on_create`，前端预览并确认后传入）、
+以及资产页的「手动维护」按钮（`/api/maintenance/preview` + `/api/maintenance/run`）。
 
 定期存款（`TERM_DEPOSIT`）：`start_date` / `term_value` / `term_unit` 必填，`maturity_date`
 由后端按自然月 / 自然年计算（目标月无对应日取月末），也可手工修正。开启自动续存的存款，

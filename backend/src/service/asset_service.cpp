@@ -9,6 +9,7 @@
 #include "common/error.hpp"
 #include "database/database.hpp"
 #include "database/transaction.hpp"
+#include "utils/maintenance_rules.hpp"
 #include "utils/strings.hpp"
 #include "utils/term_date.hpp"
 #include "utils/time_util.hpp"
@@ -131,6 +132,7 @@ void AssetService::validate_detail_combination(const Asset& asset,
 
 AssetBundle AssetService::create(std::int64_t household_id, const AssetCreateInput& input) {
   std::scoped_lock lock(database_.mutex());
+  const std::string today = time_util::business_today();
   const auto account = accounts_.find_by_id(input.account_id);
   if (!account.has_value()) {
     throw not_found("account not found");
@@ -167,6 +169,15 @@ AssetBundle AssetService::create(std::int64_t household_id, const AssetCreateInp
     TermDepositDetail detail = *input.term_deposit;
     detail.asset_id = asset.id;
     normalize_term_deposit(detail);
+    // 添加时维护：自动续存的存款若已到期，直接推进到当前存期（与每日维护一致）。
+    if (input.maintain_on_create && detail.auto_rollover && detail.maturity_date.has_value()) {
+      if (const auto advanced = maintenance_rules::advance_term_period(
+              *detail.maturity_date, *detail.term_value, *detail.term_unit, today);
+          advanced.has_value()) {
+        detail.start_date = advanced->start;
+        detail.maturity_date = advanced->maturity;
+      }
+    }
     assets_.upsert_term_deposit_detail(detail);
   }
   if (input.fund.has_value()) {
@@ -183,6 +194,14 @@ AssetBundle AssetService::create(std::int64_t household_id, const AssetCreateInp
     BondFundDetail detail = *input.bond_fund;
     detail.asset_id = asset.id;
     normalize_bond_fund(detail, std::nullopt);
+    // 添加时维护：滚动持有债基的下一赎回日若已过期，直接推进到未来周期。
+    if (input.maintain_on_create && detail.next_redeem_date.has_value()) {
+      if (const auto advanced = maintenance_rules::advance_bond_fund_next(
+              *detail.next_redeem_date, detail.holding_period_days, today);
+          advanced.has_value()) {
+        detail.next_redeem_date = *advanced;
+      }
+    }
     assets_.upsert_bond_fund_detail(detail);
   }
   if (input.insurance.has_value()) {
@@ -193,6 +212,44 @@ AssetBundle AssetService::create(std::int64_t household_id, const AssetCreateInp
   transaction.commit();
 
   return load_bundle(asset);
+}
+
+CreateMaintenancePreview AssetService::preview_create_maintenance(
+    const AssetCreateInput& input) const {
+  CreateMaintenancePreview preview;
+  preview.asset_type = detail_type_of(input);
+  const std::string today = time_util::business_today();
+
+  if (input.bond_fund.has_value() &&
+      input.bond_fund->holding_mode == HoldingMode::Rolling) {
+    // 复用创建时的补全规则算出下一赎回日，再按每日维护规则判断是否需要推进。
+    BondFundDetail detail = *input.bond_fund;
+    normalize_bond_fund(detail, std::nullopt);
+    if (detail.next_redeem_date.has_value()) {
+      if (const auto advanced = maintenance_rules::advance_bond_fund_next(
+              *detail.next_redeem_date, detail.holding_period_days, today);
+          advanced.has_value()) {
+        preview.changes.push_back(
+            CreateMaintenanceChange{"next_redeem_date", *detail.next_redeem_date, *advanced});
+      }
+    }
+  } else if (input.term_deposit.has_value() && input.term_deposit->auto_rollover) {
+    TermDepositDetail detail = *input.term_deposit;
+    normalize_term_deposit(detail);
+    if (detail.maturity_date.has_value()) {
+      if (const auto advanced = maintenance_rules::advance_term_period(
+              *detail.maturity_date, *detail.term_value, *detail.term_unit, today);
+          advanced.has_value()) {
+        preview.changes.push_back(CreateMaintenanceChange{
+            "start_date", detail.start_date.value_or(*detail.maturity_date), advanced->start});
+        preview.changes.push_back(CreateMaintenanceChange{
+            "maturity_date", *detail.maturity_date, advanced->maturity});
+      }
+    }
+  }
+
+  preview.required = !preview.changes.empty();
+  return preview;
 }
 
 AssetBundle AssetService::get_bundle(std::int64_t id) {
