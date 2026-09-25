@@ -189,6 +189,11 @@
 ### `POST /api/households/{id}/assets`
 
 创建资产。`account_id` 决定 `household_id` 与 `owner_member_id`（冗余字段自动从账户派生）。
+可选传 `payment_asset_id`，从同一家庭的一项有效资产支付 `opening_balance`。
+新资产仍以该金额作为期初本金；服务端会在同一事务中创建资产、扣除付款资产余额，
+并在付款资产上写入 `ASSET_PURCHASE` 流水。付款资产须有足够余额，且不能是负债；
+受转出限制的定活理财、商业养老金也须满足其转出条件。留空则直接创建金额，
+不扣除其他资产。该流水不计入收入或支出统计。
 
 现金/活期：
 
@@ -198,6 +203,7 @@
   "name": "活期",
   "asset_type": "CASH",
   "opening_balance": 2000000,
+  "payment_asset_id": null,
   "remark": null
 }
 ```
@@ -357,6 +363,17 @@
 
 > 若该资产已有交易，修改 `opening_balance` 返回 `40901`。
 
+### `PUT /api/assets/{id}/balance`
+
+资产管理中手动设置当前余额且不产生交易记录：
+
+```json
+{ "current_balance": 2500000 }
+```
+
+接口按余额差额同步修正 `opening_balance`。若用户选择产生记录，前端应改为调用
+`POST /api/households/{household_id}/transactions/adjustment`，并传入差额作为 `amount`。
+
 ### `PUT /api/assets/{id}/status`
 
 ```json
@@ -457,6 +474,57 @@
 
 删除流水并回滚资产余额，返回 `{"deleted": 1}`。若该流水属于某次转账
 （`transfer_group_id` 非空），会同组删除配对的两条，返回 `{"deleted": 2}`。
+若该转账来自定投，对应执行记录会标记为 `REVERSED`。
+
+---
+
+## 定投 Recurring investment
+
+### `GET /api/households/{id}/investment-plans`
+
+返回家庭定投计划。状态包括 `ACTIVE`、`PAUSED`、`DELETED`；删除为软删除，历史记录保留。
+
+### `POST /api/households/{id}/investment-plans` / `PUT /api/investment-plans/{id}`
+
+创建或编辑计划，金额单位为分。目标必须是活跃 `STOCK_FUND`；付款资产必须和目标属于同一家庭、同一成员，且为活跃非负债资产。
+
+```json
+{
+  "target_asset_id": 12,
+  "source_asset_id": 3,
+  "amount": 50000,
+  "frequency": "BIWEEKLY",
+  "weekday": 1,
+  "month_day": null,
+  "start_date": "2026-10-05"
+}
+```
+
+`frequency` 为 `DAILY` / `WEEKLY` / `BIWEEKLY` / `MONTHLY`；周频率的 `weekday` 使用 ISO 星期值 1～7（周一至周日），月频率的 `month_day` 为 1～28。当天符合计划时，创建或恢复计划会立即尝试执行。
+
+### `PUT /api/investment-plans/{id}/status`
+
+```json
+{ "status": "PAUSED" }
+```
+
+状态可设为 `ACTIVE` 或 `PAUSED`。暂停日期跳过，不在恢复时补齐。
+
+### `POST /api/investment-plans/{id}/execute`
+
+立即执行计划一次，生成以当前业务日期记录的执行结果与转账流水。暂停计划也可手动执行；每个计划每天只能手动或按期执行一次，重复执行返回冲突。余额不足等业务失败会作为 `FAILED` 执行记录返回，可在执行历史中查看原因。
+
+### `DELETE /api/investment-plans/{id}`
+
+软删除计划并停止后续执行，保留计划及历史执行记录。
+
+### `GET /api/investment-plans/{id}/executions`
+
+返回各预定日期的执行快照和结果：`SUCCESS`、`FAILED` 或 `REVERSED`。余额不足会记录失败原因，不产生交易。
+
+### `POST /api/investment-executions/{id}/retry`
+
+手动重试失败期次；交易日期保持该期的预定日期。计划已删除或期次状态不是 `FAILED` 时返回冲突。
 
 ---
 

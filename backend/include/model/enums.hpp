@@ -18,7 +18,7 @@ enum class MemberStatus { Active, Inactive };
 enum class AccountType { Bank, Alipay, Wechat, Cash, Securities, Insurance, Other };
 enum class AssetType { Cash, TermDeposit, StockFund, BondFund, FlexibleTerm, CommercialPension, Insurance, Liability, Other };
 enum class AssetStatus { Active, Closed };
-enum class TransactionType { Income, Expense, TransferIn, TransferOut, Adjustment };
+enum class TransactionType { Income, Expense, TransferIn, TransferOut, Adjustment, AssetPurchase };
 enum class TransactionStatus { Normal, Void };
 enum class TermUnit { Day, Month, Year };
 // 债券基金持有方式：MinHolding=持有期债基，Rolling=滚动持有债基。
@@ -49,7 +49,7 @@ std::optional<HoldingMode> parse_holding_mode(std::string_view text);
 // 一次交易对关联资产 current_balance 的带符号影响量（金额单位为「分」）。
 // 非转账类型遵循设计文档规则：
 //   INCOME / TRANSFER_IN   -> +amount（增加余额）
-//   EXPENSE / TRANSFER_OUT -> -amount（减少余额）
+//   EXPENSE / TRANSFER_OUT / ASSET_PURCHASE -> -amount（减少余额）
 //   ADJUSTMENT             -> +amount（amount 本身可为负，用于手工调账）
 std::int64_t transaction_delta(TransactionType type, std::int64_t amount);
 

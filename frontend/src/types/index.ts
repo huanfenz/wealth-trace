@@ -27,6 +27,7 @@ export type TransactionType =
   | 'TRANSFER_IN' // 转账转入
   | 'TRANSFER_OUT' // 转账转出
   | 'ADJUSTMENT' // 余额调整
+  | 'ASSET_PURCHASE' // 购入新资产时从付款资产扣款
 export type TermUnit = 'DAY' | 'MONTH' | 'YEAR' // 期限单位：天 / 月 / 年
 
 /** 家庭。 */
@@ -179,6 +180,21 @@ export interface Transaction {
   status: string // 交易状态
   created_at: string
   updated_at: string
+}
+
+export type InvestmentFrequency = 'DAILY' | 'WEEKLY' | 'BIWEEKLY' | 'MONTHLY'
+export interface RecurringInvestmentPlan {
+  id: number; household_id: number; owner_member_id: number
+  target_asset_id: number | null; source_asset_id: number | null; amount: number
+  frequency: InvestmentFrequency; weekday: number | null; month_day: number | null
+  start_date: string; next_due_date: string; status: 'ACTIVE' | 'PAUSED' | 'DELETED'
+  created_at: string; updated_at: string
+}
+export interface RecurringInvestmentExecution {
+  id: number; plan_id: number; scheduled_date: string; amount: number
+  source_asset_id: number | null; target_asset_id: number | null
+  status: 'SUCCESS' | 'FAILED' | 'REVERSED'; transfer_group_id: number | null
+  failure_reason: string | null; created_at: string; updated_at: string
 }
 
 /** 通用「名称 + 金额（分）」统计项。 */

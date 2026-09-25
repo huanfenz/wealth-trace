@@ -45,7 +45,8 @@ constexpr std::pair<std::string_view, TransactionType> kTransactionTypes[] = {
     {"EXPENSE", TransactionType::Expense},
     {"TRANSFER_IN", TransactionType::TransferIn},
     {"TRANSFER_OUT", TransactionType::TransferOut},
-    {"ADJUSTMENT", TransactionType::Adjustment}};
+    {"ADJUSTMENT", TransactionType::Adjustment},
+    {"ASSET_PURCHASE", TransactionType::AssetPurchase}};
 constexpr std::pair<std::string_view, TransactionStatus> kTransactionStatuses[] = {
     {"NORMAL", TransactionStatus::Normal}, {"VOID", TransactionStatus::Void}};
 constexpr std::pair<std::string_view, TermUnit> kTermUnits[] = {
@@ -99,6 +100,7 @@ std::string_view to_string(TransactionType value) {
     case TransactionType::TransferIn: return "TRANSFER_IN";
     case TransactionType::TransferOut: return "TRANSFER_OUT";
     case TransactionType::Adjustment: return "ADJUSTMENT";
+    case TransactionType::AssetPurchase: return "ASSET_PURCHASE";
   }
   return "ADJUSTMENT";
 }
@@ -155,6 +157,7 @@ std::int64_t transaction_delta(TransactionType type, std::int64_t amount) {
       return amount;
     case TransactionType::Expense:
     case TransactionType::TransferOut:
+    case TransactionType::AssetPurchase:
       return -amount;
   }
   return 0;

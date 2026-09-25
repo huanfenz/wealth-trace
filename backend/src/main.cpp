@@ -17,6 +17,7 @@
 #include "controller/household_controller.hpp"
 #include "controller/http_util.hpp"
 #include "controller/maintenance_controller.hpp"
+#include "controller/recurring_investment_controller.hpp"
 #include "controller/member_controller.hpp"
 #include "controller/meta_controller.hpp"
 #include "controller/statistics_controller.hpp"
@@ -25,6 +26,7 @@
 #include "database/database.hpp"
 #include "database/migration.hpp"
 #include "service/daily_maintenance_service.hpp"
+#include "service/recurring_investment_service.hpp"
 #include "service/household_service.hpp"
 #include "utils/time_util.hpp"
 
@@ -92,6 +94,12 @@ int main(int argc, char** argv) {
   } catch (const std::exception& error) {
     log_error(std::string("daily maintenance catch-up failed: ") + error.what());
   }
+  try {
+    RecurringInvestmentService investments(database);
+    investments.process_due();
+  } catch (const std::exception& error) {
+    log_error(std::string("recurring investment catch-up failed: ") + error.what());
+  }
 
   // 3. 创建 Crow 应用并注册路由。
   crow::SimpleApp app;
@@ -112,6 +120,7 @@ int main(int argc, char** argv) {
   MetaController meta_controller(config.categories);
   StaticFileController static_controller(config.frontend);
   MaintenanceController maintenance_controller(database);
+  RecurringInvestmentController investment_controller(database);
 
   // 先注册所有 API 路由，确保其优先于后面的静态文件通配路由。
   household_controller.register_routes(app);
@@ -122,6 +131,7 @@ int main(int argc, char** argv) {
   statistics_controller.register_routes(app);
   meta_controller.register_routes(app);
   maintenance_controller.register_routes(app);
+  investment_controller.register_routes(app);
   // 任意 /api/ 路径的 CORS OPTIONS 预检请求统一返回 204。
   CROW_ROUTE(app, "/api/<path>").methods("OPTIONS"_method)(
       [](const crow::request&, std::string) {
@@ -150,6 +160,12 @@ int main(int argc, char** argv) {
         maintenance.run_if_due();
       } catch (const std::exception& error) {
         log_error(std::string("daily maintenance failed: ") + error.what());
+      }
+      try {
+        RecurringInvestmentService investments(database);
+        investments.process_due();
+      } catch (const std::exception& error) {
+        log_error(std::string("recurring investment run failed: ") + error.what());
       }
     }
   });

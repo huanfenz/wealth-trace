@@ -72,4 +72,5 @@ export const transactionTypeLabels: Record<TransactionType, string> = {
   TRANSFER_IN: '转入',
   TRANSFER_OUT: '转出',
   ADJUSTMENT: '调整',
+  ASSET_PURCHASE: '资产购入',
 }

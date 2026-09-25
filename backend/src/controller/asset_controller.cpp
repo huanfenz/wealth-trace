@@ -201,6 +201,7 @@ void AssetController::register_routes(crow::SimpleApp& app) {
           input.name = dto::require_string(body, "name", 100);
           input.asset_type = require_asset_type(body);
           input.opening_balance = dto::optional_int64(body, "opening_balance").value_or(0);
+          input.payment_asset_id = dto::optional_int64(body, "payment_asset_id");
           input.remark = dto::optional_string(body, "remark", 500);
           input.term_deposit = parse_term_deposit(body);
           input.stock_fund = parse_stock_fund(body);
@@ -250,6 +251,16 @@ void AssetController::register_routes(crow::SimpleApp& app) {
                                   ? dto::optional_string(body, "remark", 500)
                                   : existing.remark;
           return dto::to_json(service_.update_metadata(id, name, opening, remark));
+        });
+      });
+
+  // PUT /api/assets/<int>/balance：手工设置当前余额，不生成交易记录。
+  CROW_ROUTE(app, "/api/assets/<int>/balance").methods("PUT"_method)(
+      [this](const crow::request& request, int id) {
+        return http::handle([this, &request, id] {
+          const auto body = dto::parse_object(request.body);
+          const auto balance = dto::require_int64(body, "current_balance");
+          return dto::to_json(service_.set_current_balance(id, balance));
         });
       });
 

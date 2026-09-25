@@ -10,6 +10,7 @@
 #include "database/database.hpp"
 #include "database/transaction.hpp"
 #include "utils/maintenance_rules.hpp"
+#include "utils/flexible_term.hpp"
 #include "utils/strings.hpp"
 #include "utils/term_date.hpp"
 #include "utils/time_util.hpp"
@@ -181,6 +182,42 @@ AssetBundle AssetService::create(std::int64_t household_id, const AssetCreateInp
   if (account->household_id != household_id) {
     throw invalid_request("account does not belong to the household");
   }
+  std::optional<Asset> payment_source;
+  if (input.payment_asset_id.has_value()) {
+    if (input.opening_balance <= 0) {
+      throw invalid_request("payment requires a positive opening_balance");
+    }
+    payment_source = assets_.find_by_id(*input.payment_asset_id);
+    if (!payment_source.has_value()) {
+      throw not_found("payment asset not found");
+    }
+    if (payment_source->household_id != household_id) {
+      throw invalid_request("payment asset does not belong to the household");
+    }
+    if (payment_source->status != AssetStatus::Active) {
+      throw conflict("payment asset must be active");
+    }
+    if (payment_source->asset_type == AssetType::Liability) {
+      throw invalid_request("payment asset cannot be a liability");
+    }
+    if (payment_source->current_balance < input.opening_balance) {
+      throw conflict("payment asset balance is insufficient");
+    }
+    if (payment_source->asset_type == AssetType::FlexibleTerm) {
+      const auto detail = assets_.find_flexible_term_detail(payment_source->id);
+      if (!detail.has_value() || !flexible_term::can_transfer(*detail, today)) {
+        throw conflict("flexible term asset is not open for transfer today");
+      }
+    }
+    if (payment_source->asset_type == AssetType::CommercialPension) {
+      const auto detail = assets_.find_commercial_pension_detail(payment_source->id);
+      const auto now = time_util::utc_to_business(time_util::now_iso8601());
+      if (!detail.has_value() || !detail->redeem_at_maturity ||
+          !detail->redeem_at.has_value() || now < *detail->redeem_at) {
+        throw conflict("commercial pension is not yet available for redemption");
+      }
+    }
+  }
 
   Asset asset;
   // 冗余属主：资产的 household_id/owner_member_id 一律从所属账户复制，
@@ -191,6 +228,9 @@ AssetBundle AssetService::create(std::int64_t household_id, const AssetCreateInp
   asset.name = strings::require_text(input.name, "name", 100);
   asset.asset_type = input.asset_type;
   validate_opening_balance(asset.asset_type, input.opening_balance);
+  if (payment_source.has_value() && asset.asset_type == AssetType::Liability) {
+    throw invalid_request("liability cannot be paid from another asset");
+  }
   // 新资产尚无交易，current_balance 即等于期初余额。
   asset.opening_balance = input.opening_balance;
   asset.current_balance = input.opening_balance;
@@ -262,6 +302,25 @@ AssetBundle AssetService::create(std::int64_t household_id, const AssetCreateInp
     detail.asset_id = asset.id;
     normalize_commercial_pension(detail, std::nullopt);
     assets_.upsert_commercial_pension_detail(detail);
+  }
+  if (payment_source.has_value()) {
+    // 期初金额仍是新资产的本金；付款只在来源资产记扣款流水。
+    // 创建、明细、扣款及流水在同一事务里，失败时全部回滚。
+    Transaction payment;
+    payment.household_id = household_id;
+    payment.owner_member_id = payment_source->owner_member_id;
+    payment.asset_id = payment_source->id;
+    payment.type = TransactionType::AssetPurchase;
+    payment.amount = input.opening_balance;
+    payment.balance_before = payment_source->current_balance;
+    payment.balance_after = payment_source->current_balance - input.opening_balance;
+    payment.transaction_time = asset.created_at;
+    payment.remark = "购入资产「" + asset.name + "」(#" + std::to_string(asset.id) + ")";
+    payment.status = TransactionStatus::Normal;
+    payment.created_at = asset.created_at;
+    payment.updated_at = asset.created_at;
+    transactions_.create(payment);
+    assets_.update_balance(payment_source->id, *payment.balance_after, asset.created_at);
   }
   transaction.commit();
 
@@ -396,6 +455,23 @@ Asset AssetService::update_metadata(std::int64_t id, const std::string& name,
   if (balance_changed) {
     assets_.update_balance(asset.id, asset.current_balance, asset.updated_at);
   }
+  transaction.commit();
+  return asset;
+}
+
+Asset AssetService::set_current_balance(std::int64_t id, std::int64_t current_balance) {
+  std::scoped_lock lock(database_.mutex());
+  Asset asset = get(id);
+  validate_opening_balance(asset.asset_type, current_balance);
+  const std::int64_t delta = current_balance - asset.current_balance;
+  asset.current_balance = current_balance;
+  // 手工修改余额且不记流水时，将差额归入期初基准，维持 current_balance = opening_balance + Σdelta。
+  asset.opening_balance += delta;
+  asset.updated_at = time_util::now_iso8601();
+
+  TransactionGuard transaction(database_);
+  assets_.update_metadata(asset);
+  assets_.update_balance(asset.id, asset.current_balance, asset.updated_at);
   transaction.commit();
   return asset;
 }

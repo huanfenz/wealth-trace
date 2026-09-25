@@ -36,6 +36,12 @@ const router = createRouter({
       meta: { title: '收支与转账' },
     },
     {
+      path: '/investments',
+      name: 'investments',
+      component: () => import('@/views/RecurringInvestmentsView.vue'),
+      meta: { title: '定投管理' },
+    },
+    {
       path: '/statistics',
       name: 'statistics',
       component: () => import('@/views/StatisticsView.vue'),

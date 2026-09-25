@@ -7,6 +7,7 @@
 #include <nlohmann/json.hpp>
 
 #include "model/entities.hpp"
+#include "model/recurring_investment.hpp"
 #include "repository/statistics_repository.hpp"
 #include "service/account_service.hpp"
 #include "service/asset_service.hpp"
@@ -48,6 +49,8 @@ nlohmann::json to_json(const MaintenanceResult& result);
 nlohmann::json to_json(const Transaction& transaction);
 // 转账结果：同时返回转出与转入两条流水。
 nlohmann::json to_json(const TransferResult& result);
+nlohmann::json to_json(const RecurringInvestmentPlan& plan);
+nlohmann::json to_json(const RecurringInvestmentExecution& execution);
 
 // 按成员聚合的金额（金额为分）。
 nlohmann::json to_json(const NamedAmount& amount);

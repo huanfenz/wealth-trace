@@ -10,6 +10,7 @@
 #include "model/entities.hpp"
 #include "repository/asset_repository.hpp"
 #include "repository/transaction_repository.hpp"
+#include "repository/recurring_investment_repository.hpp"
 
 namespace wt {
 
@@ -31,7 +32,7 @@ struct TransferResult {
 class TransactionService {
  public:
   explicit TransactionService(Database& database)
-      : assets_(database), transactions_(database), database_(database) {}
+      : assets_(database), transactions_(database), investments_(database), database_(database) {}
 
   // 记一笔收入：资产必须存在且 ACTIVE，amount 必须为正（>0）。
   // 业务错误：not_found / invalid_request / conflict（资产已关闭）。
@@ -85,6 +86,7 @@ class TransactionService {
 
   AssetRepository assets_;
   TransactionRepository transactions_;
+  RecurringInvestmentRepository investments_;
   Database& database_;
 };
 

@@ -13,8 +13,35 @@ import type {
   MonthlyStat,
   Paged,
   PeriodStatistics,
+  RecurringInvestmentExecution,
+  RecurringInvestmentPlan,
   Transaction,
 } from '@/types'
+
+export function listInvestmentPlans(householdId: number): Promise<RecurringInvestmentPlan[]> {
+  return get<RecurringInvestmentPlan[]>(`/households/${householdId}/investment-plans`)
+}
+export function createInvestmentPlan(householdId: number, body: Record<string, unknown>): Promise<RecurringInvestmentPlan> {
+  return post<RecurringInvestmentPlan>(`/households/${householdId}/investment-plans`, body)
+}
+export function updateInvestmentPlan(id: number, body: Record<string, unknown>): Promise<RecurringInvestmentPlan> {
+  return put<RecurringInvestmentPlan>(`/investment-plans/${id}`, body)
+}
+export function setInvestmentPlanStatus(id: number, status: 'ACTIVE' | 'PAUSED'): Promise<RecurringInvestmentPlan> {
+  return put<RecurringInvestmentPlan>(`/investment-plans/${id}/status`, { status })
+}
+export function executeInvestmentPlan(id: number): Promise<RecurringInvestmentExecution> {
+  return post<RecurringInvestmentExecution>(`/investment-plans/${id}/execute`, {})
+}
+export function deleteInvestmentPlan(id: number): Promise<{ deleted: boolean }> {
+  return del<{ deleted: boolean }>(`/investment-plans/${id}`)
+}
+export function listInvestmentExecutions(id: number): Promise<RecurringInvestmentExecution[]> {
+  return get<RecurringInvestmentExecution[]>(`/investment-plans/${id}/executions`)
+}
+export function retryInvestmentExecution(id: number): Promise<RecurringInvestmentExecution> {
+  return post<RecurringInvestmentExecution>(`/investment-executions/${id}/retry`, {})
+}
 
 /** 获取全局元数据（枚举、分类、金额与利率精度等）。 */
 export function getMeta(): Promise<Meta> {
@@ -139,6 +166,11 @@ export function previewCreateMaintenance(
 /** 更新资产基本信息。 */
 export function updateAsset(id: number, body: Record<string, unknown>): Promise<Asset> {
   return put<Asset>(`/assets/${id}`, body)
+}
+
+/** 手动设置当前余额，不生成交易记录。 */
+export function setAssetBalance(id: number, currentBalance: number): Promise<Asset> {
+  return put<Asset>(`/assets/${id}/balance`, { current_balance: currentBalance })
 }
 
 /** 更新资产状态（ACTIVE/CLOSED）。 */

@@ -3,11 +3,14 @@
   <div>
     <div class="toolbar">
       <el-button type="primary" :icon="Plus" @click="openCreate">新增成员</el-button>
+      <el-button :disabled="selectedMembers.length === 0" @click="bulkPause">批量停用</el-button>
+      <span v-if="selectedMembers.length" class="selection-count">已选 {{ selectedMembers.length }} 项</span>
       <div class="spacer" />
     </div>
 
     <el-card shadow="never">
-      <el-table :data="store.members" v-loading="loading">
+      <el-table :data="store.members" v-loading="loading" @selection-change="selectedMembers = $event">
+        <el-table-column type="selection" width="48" />
         <el-table-column prop="name" label="姓名" />
         <el-table-column label="角色">
           <template #default="{ row }">
@@ -60,7 +63,7 @@
 <script setup lang="ts">
 // 职责：展示/维护成员列表；弹窗表单用于新增或编辑，保存后刷新 store 中的成员缓存。
 import { reactive, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 
 import { createMember, updateMember } from '@/api'
@@ -70,6 +73,7 @@ import type { Member, MemberRole, MemberStatus } from '@/types'
 
 const store = useAppStore()
 const loading = ref(false)        // 列表加载中
+const selectedMembers = ref<Member[]>([])
 const saving = ref(false)         // 表单提交中
 const dialogVisible = ref(false)  // 弹窗显隐
 const editing = ref<Member | null>(null) // 当前编辑对象，null 表示新增
@@ -121,4 +125,18 @@ async function save() {
     saving.value = false
   }
 }
+
+async function bulkPause() {
+  const targets = selectedMembers.value.filter((member) => member.status === 'ACTIVE')
+  if (!targets.length) { ElMessage.warning('所选成员均已停用'); return }
+  try { await ElMessageBox.confirm(`确认停用选中的 ${targets.length} 位成员？`, '批量停用成员', { type: 'warning' }) } catch { return }
+  const results = await Promise.allSettled(targets.map((member) => updateMember(member.id, {
+    name: member.name, role: member.role, status: 'INACTIVE',
+  })))
+  await store.refreshMembers()
+  const failed = results.filter((result) => result.status === 'rejected').length
+  ElMessage[failed ? 'warning' : 'success'](`批量停用完成：成功 ${targets.length - failed} 位，失败 ${failed} 位`)
+}
 </script>
+
+<style scoped>.selection-count { color: #909399; font-size: 13px; }</style>

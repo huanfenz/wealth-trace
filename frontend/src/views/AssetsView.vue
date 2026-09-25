@@ -4,6 +4,9 @@
     <div class="toolbar">
       <el-button type="primary" :icon="Plus" @click="openCreate">新增资产</el-button>
       <el-button :icon="Refresh" :loading="maintaining" @click="runMaintenance">手动维护</el-button>
+      <el-button :disabled="selectedAssets.length === 0" @click="bulkClose">批量关闭</el-button>
+      <el-button type="danger" :disabled="selectedAssets.length === 0" @click="bulkRemove">批量删除</el-button>
+      <span v-if="selectedAssets.length" class="selection-count">已选 {{ selectedAssets.length }} 项</span>
       <el-select v-model="filterMember" clearable placeholder="按成员" style="width: 150px" @change="load">
         <el-option v-for="m in store.members" :key="m.id" :label="m.name" :value="m.id" />
       </el-select>
@@ -14,7 +17,8 @@
     </div>
 
     <el-card shadow="never">
-      <el-table :data="assets" v-loading="loading">
+      <el-table :data="assets" v-loading="loading" @selection-change="selectedAssets = $event">
+        <el-table-column type="selection" width="48" />
         <el-table-column prop="name" label="资产" min-width="110">
           <template #default="{ row }"><div class="asset-name">{{ row.name }}</div></template>
         </el-table-column>
@@ -53,10 +57,17 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="140" align="right">
+        <el-table-column label="操作" width="230" align="right">
           <template #default="{ row }">
             <div class="asset-actions">
               <el-button link type="primary" @click="openEdit(row)">编辑</el-button>
+              <el-button link type="primary" @click="openAppend(row)">追加</el-button>
+              <el-button
+                v-if="row.asset_type === 'STOCK_FUND' && row.status === 'ACTIVE'"
+                link
+                type="primary"
+                @click="openInvestment(row)"
+              >定投</el-button>
               <el-button
                 link
                 :type="row.status === 'ACTIVE' ? 'warning' : 'success'"
@@ -73,10 +84,17 @@
 
     <el-dialog
       v-model="dialogVisible"
-      :title="editing ? '编辑资产' : '新增资产'"
+      :title="editing ? '编辑资产' : appendSource ? '追加资产' : '新增资产'"
       width="640px"
       top="6vh"
     >
+      <el-alert
+        v-if="appendSource"
+        :title="`基于「${appendSource.name}」新增一项资产；金额从零开始，适用的购买或起息日期已更新。`"
+        type="info"
+        :closable="false"
+        style="margin-bottom: 16px"
+      />
       <el-form :model="form" label-width="100px">
         <el-divider content-position="left">基本信息</el-divider>
         <el-form-item label="所属账户" required>
@@ -90,7 +108,7 @@
           </el-select>
         </el-form-item>
         <el-form-item label="资产类型">
-          <el-select v-model="form.asset_type" style="width: 100%" :disabled="!!editing">
+          <el-select v-model="form.asset_type" style="width: 100%" :disabled="!!editing" @change="form.payment_asset_id = null">
             <el-option
               v-for="(label, value) in assetTypeLabels"
               :key="value"
@@ -102,8 +120,18 @@
         <el-form-item label="资产名称" required>
           <el-input v-model="form.name" maxlength="100" />
         </el-form-item>
-        <el-form-item label="初始金额(元)">
-          <el-input v-model="form.opening_balance_yuan" :disabled="!!editing && row?.opening_balance !== row?.current_balance" />
+        <el-form-item :label="editing ? '当前余额(元)' : '初始金额(元)'">
+          <el-input v-model="form.opening_balance_yuan" />
+        </el-form-item>
+        <el-form-item v-if="!editing && form.asset_type !== 'LIABILITY'" label="支付资产">
+          <el-select v-model="form.payment_asset_id" clearable filterable placeholder="不选择，直接新增金额" style="width: 100%">
+            <el-option
+              v-for="asset in paymentAssets"
+              :key="asset.id"
+              :label="`${store.memberName(asset.owner_member_id)} · ${store.accountName(asset.account_id)} · ${asset.name}（余额 ${toYuanInput(asset.current_balance)} 元）`"
+              :value="asset.id"
+            />
+          </el-select>
         </el-form-item>
         <el-form-item label="备注">
           <el-input v-model="form.remark" maxlength="500" />
@@ -279,6 +307,7 @@
 <script setup lang="ts">
 // 职责：展示/维护资产列表；弹窗表单按 asset_type 切换明细块，负责「元↔分」「百分数↔定点利率」换算后提交。
 import { computed, onMounted, reactive, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Refresh } from '@element-plus/icons-vue'
 
@@ -290,7 +319,9 @@ import {
   getMaintenancePreview,
   listAssets,
   previewCreateMaintenance,
+  recordAdjustment,
   runDailyMaintenance,
+  setAssetBalance,
   updateAsset,
   updateAssetDetail,
   updateAssetStatus,
@@ -301,13 +332,19 @@ import { percentToScaled, scaledToPercent, toMinor, toYuanInput } from '@/utils/
 import type { Asset, AssetStatus, AssetType, HoldingMode, TermUnit } from '@/types'
 
 const store = useAppStore()
+const router = useRouter()
+
+function openInvestment(asset: Asset) {
+  void router.push({ name: 'investments', query: { target_asset_id: String(asset.id) } })
+}
 const assets = ref<Asset[]>([])       // 当前筛选条件下的资产列表
+const selectedAssets = ref<Asset[]>([])
 const loading = ref(false)            // 列表加载中
 const saving = ref(false)             // 表单提交中
 const maintaining = ref(false)        // 手动维护请求中
 const dialogVisible = ref(false)      // 弹窗显隐
 const editing = ref<Asset | null>(null) // 当前编辑对象，null 表示新增
-const row = ref<Asset | null>(null)   // 当前编辑行，用于判断初始金额是否可改
+const appendSource = ref<Asset | null>(null)
 const filterMember = ref<number | undefined>(undefined)  // 按成员筛选
 const filterAccount = ref<number | undefined>(undefined) // 按账户筛选
 
@@ -321,11 +358,15 @@ const maintenanceFieldLabels: Record<string, string> = {
 // 资产基本信息表单（金额以「元」字符串编辑，提交时再换算为「分」）。
 const form = reactive({
   account_id: 0,
+  payment_asset_id: null as number | null,
   name: '',
   asset_type: 'CASH' as AssetType,
   opening_balance_yuan: '0.00',
   remark: '',
 })
+const paymentAssets = computed(() => store.assets.filter(
+  (asset) => asset.status === 'ACTIVE' && asset.asset_type !== 'LIABILITY',
+))
 
 // 各类型明细的合并表单：金额以「元」、利率以百分数字符串编辑，仅渲染当前类型所需字段。
 const detail = reactive({
@@ -524,7 +565,8 @@ async function load() {
 // 打开「新增」弹窗，默认账户为第一个、类型为 CASH。
 function openCreate() {
   editing.value = null
-  row.value = null
+  appendSource.value = null
+  form.payment_asset_id = null
   form.account_id = store.accounts[0]?.id ?? 0
   form.name = ''
   form.asset_type = 'CASH'
@@ -534,22 +576,25 @@ function openCreate() {
   dialogVisible.value = true
 }
 
-// 打开「编辑」弹窗：基本信息回填，并把「分」金额、「定点利率」分别转成「元」「百分数」展示。
-async function openEdit(asset: Asset) {
+// 养老金列表中的时间状态可能已变化，打开表单前取最新明细。
+async function currentAsset(asset: Asset): Promise<Asset | null> {
   if (asset.asset_type === 'COMMERCIAL_PENSION') {
     try {
-      asset = await getAsset(asset.id)
+      return await getAsset(asset.id)
     } catch (error) {
       ElMessage.error((error as Error).message)
-      return
+      return null
     }
   }
-  editing.value = asset
-  row.value = asset
+  return asset
+}
+
+// 编辑和追加共用回填逻辑；追加后再重置本次购买的金额和时间。
+function fillAssetForm(asset: Asset) {
   form.account_id = asset.account_id
   form.name = asset.name
   form.asset_type = asset.asset_type
-  form.opening_balance_yuan = toYuanInput(asset.opening_balance) // 分 -> 元
+  form.opening_balance_yuan = toYuanInput(asset.current_balance) // 分 -> 元
   form.remark = asset.remark ?? ''
   resetDetail()
   // 按存在的明细块分别回填，金额/利率做展示口径转换。
@@ -598,6 +643,58 @@ async function openEdit(asset: Asset) {
     detail.effective_date = asset.insurance.effective_date
     detail.annual_premium_yuan = toYuanInput(asset.insurance.annual_premium)
     detail.insured_amount_yuan = toYuanInput(asset.insurance.insured_amount)
+  }
+}
+
+async function openEdit(selected: Asset) {
+  const asset = await currentAsset(selected)
+  if (!asset) return
+  editing.value = asset
+  appendSource.value = null
+  form.payment_asset_id = null
+  fillAssetForm(asset)
+  dialogVisible.value = true
+}
+
+function businessNow(): { date: string; datetime: string } {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat('en-US', {
+      timeZone: store.meta?.business_timezone ?? 'Asia/Shanghai',
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
+    }).formatToParts(new Date()).map(({ type, value }) => [type, value]),
+  )
+  const date = `${parts.year}-${parts.month}-${parts.day}`
+  return { date, datetime: `${date} ${parts.hour}:${parts.minute}:${parts.second}` }
+}
+
+async function openAppend(selected: Asset) {
+  const asset = await currentAsset(selected)
+  if (!asset) return
+  editing.value = null
+  appendSource.value = asset
+  form.payment_asset_id = null
+  fillAssetForm(asset)
+  form.opening_balance_yuan = '0.00'
+  const now = businessNow()
+  if (asset.asset_type === 'TERM_DEPOSIT') {
+    detail.start_date = now.date
+    detail.maturity_date = null // 由新起息日和原存期重新推算
+  } else if (asset.asset_type === 'BOND_FUND') {
+    detail.bf_purchase_date = now.date
+    detail.bf_first_redeem_date = null
+    detail.bf_next_redeem_date = null
+    detail.bf_maturity_date = null
+  } else if (asset.asset_type === 'FLEXIBLE_TERM') {
+    detail.ft_purchase_date = now.date
+  } else if (asset.asset_type === 'COMMERCIAL_PENSION') {
+    detail.cp_purchase_time = now.datetime
+    detail.cp_reservation_window = []
+  } else if (asset.asset_type === 'STOCK_FUND') {
+    detail.lock_end_date = null
+  } else if (asset.asset_type === 'INSURANCE') {
+    detail.policy_no = ''
+    detail.effective_date = now.date
   }
   dialogVisible.value = true
 }
@@ -698,13 +795,48 @@ async function save() {
   }
   saving.value = true
   try {
+    const openingBalance = toMinor(form.opening_balance_yuan)
+    if (!editing.value && form.payment_asset_id && openingBalance <= 0) {
+      ElMessage.warning('选择支付资产时，请填写大于零的金额')
+      return
+    }
     const detailPayload = buildDetail(form.asset_type)
     if (editing.value) {
+      const balance = toMinor(form.opening_balance_yuan)
+      const balanceDelta = balance - editing.value.current_balance
+      let createAdjustment = false
+      if (balanceDelta !== 0) {
+        try {
+          await ElMessageBox.confirm(
+            `当前余额将从 ${toYuanInput(editing.value.current_balance)} 元改为 ${toYuanInput(balance)} 元。是否同时产生一笔余额调整记录？`,
+            '确认余额修改',
+            {
+              type: 'info',
+              confirmButtonText: '产生记录',
+              cancelButtonText: '仅修改余额',
+              distinguishCancelAndClose: true,
+            },
+          )
+          createAdjustment = true
+        } catch (action) {
+          if ((action as { action?: string })?.action === 'close') return
+        }
+      }
       await updateAsset(editing.value.id, {
         name: form.name,
-        opening_balance: toMinor(form.opening_balance_yuan),
         remark: form.remark,
       })
+      if (balanceDelta !== 0) {
+        if (createAdjustment) {
+          await recordAdjustment(store.householdId, {
+            asset_id: editing.value.id,
+            amount: balanceDelta,
+            remark: '资产管理中手动修改余额',
+          })
+        } else {
+          await setAssetBalance(editing.value.id, balance)
+        }
+      }
       if (detailPayload && detailKey[form.asset_type]) {
         await updateAssetDetail(editing.value.id, {
           detail_type: form.asset_type,
@@ -716,7 +848,8 @@ async function save() {
         account_id: form.account_id,
         name: form.name,
         asset_type: form.asset_type,
-        opening_balance: toMinor(form.opening_balance_yuan),
+        opening_balance: openingBalance,
+        payment_asset_id: form.asset_type === 'LIABILITY' ? null : form.payment_asset_id,
         remark: form.remark,
       }
       if (detailPayload && detailKey[form.asset_type]) {
@@ -867,6 +1000,33 @@ async function remove(asset: Asset) {
     ElMessage.error((error as Error).message)
   }
 }
+
+async function bulkClose() {
+  const targets = selectedAssets.value.filter((asset) => asset.status === 'ACTIVE')
+  if (!targets.length) { ElMessage.warning('所选资产均已关闭'); return }
+  try { await ElMessageBox.confirm(`关闭后这 ${targets.length} 项资产将不再计入统计，也不能新增交易。确认继续？`, '批量关闭资产', { type: 'warning' }) } catch { return }
+  const results = await Promise.allSettled(targets.map((asset) => updateAssetStatus(asset.id, 'CLOSED')))
+  await load()
+  const failed = results.filter((result) => result.status === 'rejected').length
+  ElMessage[failed ? 'warning' : 'success'](`批量关闭完成：成功 ${targets.length - failed} 项，失败 ${failed} 项`)
+}
+
+async function bulkRemove() {
+  const targets = selectedAssets.value
+  if (!targets.length) return
+  try {
+    await ElMessageBox.prompt(
+      `将永久删除所选 ${targets.length} 项资产及其全部流水和明细，且不可恢复。请输入“删除资产”以确认。`,
+      '批量删除资产',
+      { type: 'warning', confirmButtonText: '确认删除', cancelButtonText: '取消', confirmButtonClass: 'el-button--danger', inputValidator: (value) => value === '删除资产' || '请输入“删除资产”' },
+    )
+  } catch { return }
+  const results = await Promise.allSettled(targets.map((asset) => deleteAsset(asset.id)))
+  await load()
+  const failed = results.filter((result) => result.status === 'rejected').length
+  await store.refreshAssets()
+  ElMessage[failed ? 'warning' : 'success'](`批量删除完成：成功 ${targets.length - failed} 项，失败 ${failed} 项`)
+}
 </script>
 
 <style scoped>
@@ -890,5 +1050,10 @@ async function remove(asset: Asset) {
 
 .asset-actions :deep(.el-button + .el-button) {
   margin-left: 0;
+}
+
+.selection-count {
+  color: #909399;
+  font-size: 13px;
 }
 </style>

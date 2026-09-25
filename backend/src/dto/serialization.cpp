@@ -315,6 +315,21 @@ nlohmann::json to_json(const TransferResult& result) {
   return {{"outgoing", to_json(result.outgoing)}, {"incoming", to_json(result.incoming)}};
 }
 
+nlohmann::json to_json(const RecurringInvestmentPlan& p) {
+  return {{"id",p.id},{"household_id",p.household_id},{"owner_member_id",p.owner_member_id},
+          {"target_asset_id",optional_int(p.target_asset_id)},{"source_asset_id",optional_int(p.source_asset_id)},
+          {"amount",p.amount},{"frequency",p.frequency},{"weekday",p.weekday? nlohmann::json(*p.weekday):nlohmann::json(nullptr)},
+          {"month_day",p.month_day? nlohmann::json(*p.month_day):nlohmann::json(nullptr)},
+          {"start_date",p.start_date},{"next_due_date",p.next_due_date},{"status",p.status},
+          {"created_at",p.created_at},{"updated_at",p.updated_at}};
+}
+nlohmann::json to_json(const RecurringInvestmentExecution& e) {
+  return {{"id",e.id},{"plan_id",e.plan_id},{"scheduled_date",e.scheduled_date},{"amount",e.amount},
+          {"source_asset_id",optional_int(e.source_asset_id)},{"target_asset_id",optional_int(e.target_asset_id)},
+          {"status",e.status},{"transfer_group_id",optional_int(e.transfer_group_id)},
+          {"failure_reason",optional_text(e.failure_reason)},{"created_at",e.created_at},{"updated_at",e.updated_at}};
+}
+
 // 按成员聚合：成员 id / 名称 / 金额（分）。
 nlohmann::json to_json(const NamedAmount& amount) {
   return {{"id", amount.id}, {"name", amount.name}, {"amount", amount.amount}};

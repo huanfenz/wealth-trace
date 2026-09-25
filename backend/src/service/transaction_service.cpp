@@ -286,6 +286,9 @@ std::int64_t TransactionService::remove(std::int64_t id) {
   const std::string now = time_util::now_iso8601();
   // 逐条回滚余额并删除流水，全部放在一个事务里：要么都成功，要么都回滚。
   TransactionGuard guard(database_);
+  if (target->transfer_group_id.has_value()) {
+    investments_.mark_reversed(*target->transfer_group_id, now);
+  }
   for (const auto& transaction : to_delete) {
     const auto asset = assets_.find_by_id(transaction.asset_id);
     if (asset.has_value()) {

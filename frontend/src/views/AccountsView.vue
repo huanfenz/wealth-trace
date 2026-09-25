@@ -3,6 +3,9 @@
   <div>
     <div class="toolbar">
       <el-button type="primary" :icon="Plus" @click="openCreate">新增账户</el-button>
+      <el-button :disabled="selectedAccounts.length === 0" @click="bulkDisable">批量停用</el-button>
+      <el-button type="danger" :disabled="selectedAccounts.length === 0" @click="bulkRemove">批量删除</el-button>
+      <span v-if="selectedAccounts.length" class="selection-count">已选 {{ selectedAccounts.length }} 项</span>
       <el-select v-model="filterMember" clearable placeholder="按成员筛选" style="width: 180px" @change="load">
         <el-option v-for="m in store.members" :key="m.id" :label="m.name" :value="m.id" />
       </el-select>
@@ -10,7 +13,8 @@
     </div>
 
     <el-card shadow="never">
-      <el-table :data="accounts" v-loading="loading">
+      <el-table :data="accounts" v-loading="loading" @selection-change="selectedAccounts = $event">
+        <el-table-column type="selection" width="48" />
         <el-table-column prop="name" label="账户" />
         <el-table-column label="类型" width="100">
           <template #default="{ row }">{{ accountTypeLabels[row.type as AccountType] }}</template>
@@ -96,6 +100,7 @@ import type { Account, AccountType } from '@/types'
 
 const store = useAppStore()
 const accounts = ref<Account[]>([])       // 当前筛选条件下的账户列表
+const selectedAccounts = ref<Account[]>([])
 const loading = ref(false)                // 列表加载中
 const saving = ref(false)                 // 表单提交中
 const dialogVisible = ref(false)          // 弹窗显隐
@@ -216,4 +221,30 @@ async function remove(account: Account) {
     ElMessage.error((error as Error).message)
   }
 }
+
+async function bulkDisable() {
+  const targets = selectedAccounts.value.filter((account) => account.enabled)
+  if (!targets.length) { ElMessage.warning('所选账户均已停用'); return }
+  try { await ElMessageBox.confirm(`确认停用选中的 ${targets.length} 个启用账户？`, '批量停用', { type: 'warning' }) } catch { return }
+  const results = await Promise.allSettled(targets.map((account) => updateAccount(account.id, {
+    owner_member_id: account.owner_member_id, name: account.name, type: account.type,
+    institution_name: account.institution_name ?? '', account_no_masked: account.account_no_masked ?? '',
+    remark: account.remark ?? '', enabled: false,
+  })))
+  await load()
+  const failed = results.filter((result) => result.status === 'rejected').length
+  ElMessage[failed ? 'warning' : 'success'](`批量停用完成：成功 ${targets.length - failed} 个，失败 ${failed} 个`)
+}
+
+async function bulkRemove() {
+  const targets = selectedAccounts.value
+  if (!targets.length) return
+  try { await ElMessageBox.confirm(`确认删除选中的 ${targets.length} 个账户？仍有关联资产的账户会被跳过。`, '批量删除账户', { type: 'warning', confirmButtonText: '确认删除', confirmButtonClass: 'el-button--danger' }) } catch { return }
+  const results = await Promise.allSettled(targets.map((account) => deleteAccount(account.id)))
+  await load()
+  const failed = results.filter((result) => result.status === 'rejected').length
+  ElMessage[failed ? 'warning' : 'success'](`批量删除完成：成功 ${targets.length - failed} 个，失败 ${failed} 个`)
+}
 </script>
+
+<style scoped>.selection-count { color: #909399; font-size: 13px; }</style>

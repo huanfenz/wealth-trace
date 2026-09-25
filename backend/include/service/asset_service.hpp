@@ -22,6 +22,8 @@ struct AssetCreateInput {
   std::string name;
   AssetType asset_type = AssetType::Cash;
   std::int64_t opening_balance = 0;
+  // 可选付款来源；有值时从该资产扣除 opening_balance，并记录资产购入流水。
+  std::optional<std::int64_t> payment_asset_id;
   std::optional<std::string> remark;
   std::optional<TermDepositDetail> term_deposit;
   std::optional<StockFundDetail> stock_fund;
@@ -69,7 +71,7 @@ class AssetService {
 
   // 创建资产：账户不存在抛 not_found；校验 opening_balance 符号与明细组合，
   // 在事务中同时写入资产与（可选）明细，全成功或全回滚。
-  // current_balance 初始化为 opening_balance（此时还没有任何交易）。
+  // current_balance 初始化为 opening_balance；若指定付款资产，同时扣除来源余额并记购入流水。
   // maintain_on_create 为 true 时，写入前先按每日维护规则推进过期日期。
   AssetBundle create(std::int64_t household_id, const AssetCreateInput& input);
 
@@ -94,6 +96,9 @@ class AssetService {
   Asset update_metadata(std::int64_t id, const std::string& name,
                         std::optional<std::int64_t> opening_balance,
                         const std::optional<std::string>& remark);
+
+  // 手动设置当前余额，不创建交易记录；通过同步调整 opening_balance 保持账面余额一致。
+  Asset set_current_balance(std::int64_t id, std::int64_t current_balance);
 
   // 更新资产状态（ACTIVE/CLOSED）；资产不存在抛 not_found。
   // CLOSED 资产不计入统计且不能再产生交易（由交易服务校验）。

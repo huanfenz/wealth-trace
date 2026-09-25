@@ -24,10 +24,13 @@
         <el-option v-for="(label, value) in transactionTypeLabels" :key="value" :label="label" :value="value" />
       </el-select>
       <div class="spacer" />
+      <el-button type="danger" :disabled="selectedTransactions.length === 0" @click="bulkRemove">批量删除</el-button>
+      <span v-if="selectedTransactions.length" class="selection-count">已选 {{ selectedTransactions.length }} 项</span>
     </div>
 
     <el-card shadow="never">
-      <el-table :data="transactions" v-loading="loading">
+      <el-table :data="transactions" v-loading="loading" @selection-change="selectedTransactions = $event">
+        <el-table-column type="selection" width="48" />
         <el-table-column prop="transaction_time" label="时间" width="170" />
         <el-table-column label="成员" width="110">
           <template #default="{ row }">{{ store.memberName(row.owner_member_id) }}</template>
@@ -144,6 +147,7 @@ type DialogKind = 'income' | 'expense' | 'transfer' | 'adjustment' // 弹窗形�
 
 const store = useAppStore()
 const transactions = ref<Transaction[]>([]) // 当前页流水
+const selectedTransactions = ref<Transaction[]>([])
 const loading = ref(false)                  // 列表加载中
 const saving = ref(false)                   // 表单提交中
 const total = ref(0)                        // 总条数
@@ -195,6 +199,7 @@ function signedAmount(transaction: Transaction): number {
   switch (transaction.type) {
     case 'EXPENSE':
     case 'TRANSFER_OUT':
+    case 'ASSET_PURCHASE':
       return -transaction.amount
     case 'ADJUSTMENT':
       return transaction.amount
@@ -211,6 +216,7 @@ function tagType(type: TransactionType): 'success' | 'warning' | 'primary' | 'in
       return 'success'
     case 'EXPENSE':
     case 'TRANSFER_OUT':
+    case 'ASSET_PURCHASE':
       return 'warning'
     case 'ADJUSTMENT':
       return 'info'
@@ -362,6 +368,29 @@ async function remove(transaction: Transaction) {
     ElMessage.error((error as Error).message)
   }
 }
+
+async function bulkRemove() {
+  const targets = selectedTransactions.value
+  if (!targets.length) return
+  try {
+    await ElMessageBox.confirm(
+      `确认删除选中的 ${targets.length} 条流水？删除转账记录时会同时删除配对流水，并回滚相关资产余额。此操作不可恢复。`,
+      '批量删除流水',
+      { type: 'warning', confirmButtonText: '确认删除', cancelButtonText: '取消', confirmButtonClass: 'el-button--danger' },
+    )
+  } catch { return }
+  const seenGroups = new Set<number>()
+  const operations = targets.filter((transaction) => {
+    if (transaction.transfer_group_id === null) return true
+    if (seenGroups.has(transaction.transfer_group_id)) return false
+    seenGroups.add(transaction.transfer_group_id)
+    return true
+  })
+  const results = await Promise.allSettled(operations.map((transaction) => deleteTransaction(transaction.id)))
+  await Promise.all([load(), store.refreshAssets()])
+  const failed = results.filter((result) => result.status === 'rejected').length
+  ElMessage[failed ? 'warning' : 'success'](`批量删除完成：成功 ${operations.length - failed} 项，失败 ${failed} 项`)
+}
 </script>
 
 <style scoped>
@@ -370,4 +399,5 @@ async function remove(transaction: Transaction) {
   display: flex;
   justify-content: flex-end;
 }
+.selection-count { color: #909399; font-size: 13px; }
 </style>

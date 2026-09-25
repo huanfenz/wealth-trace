@@ -74,7 +74,7 @@ wealth-trace/
 │   ├── src/{api,components,views,router,stores,types,utils}/
 │   └── vite.config.ts          # /api 代理到后端
 │
-├── migrations/                 # SQL migration（001–010，含资产类型与明细字段调整）
+├── migrations/                 # SQL migration（001–011，含资产类型与定投计划）
 ├── data/                       # SQLite 数据库文件（运行时生成）
 ├── docs/                       # API 与设计问题说明
 └── scripts/                    # 冒烟测试脚本
@@ -290,6 +290,12 @@ WEALTH_TRACE_CONFIG=/path/to/config.json ./build/backend/wealth-trace
 | POST | `/api/households/{id}/transactions/expense` | 记账支出 |
 | POST | `/api/households/{id}/transactions/adjustment` | 余额调整 |
 | POST | `/api/households/{id}/transfers` | 转账（两条流水） |
+| GET/POST | `/api/households/{id}/investment-plans` | 定投计划列表 / 创建 |
+| PUT/DELETE | `/api/investment-plans/{id}` | 更新 / 删除定投计划 |
+| PUT | `/api/investment-plans/{id}/status` | 暂停 / 恢复定投计划 |
+| POST | `/api/investment-plans/{id}/execute` | 立即执行一次定投 |
+| GET | `/api/investment-plans/{id}/executions` | 定投执行历史 |
+| POST | `/api/investment-executions/{id}/retry` | 重试失败定投期次 |
 | GET | `/api/transactions/{id}` | 单条流水 |
 | DELETE | `/api/transactions/{id}` | 删除流水（回滚余额，转账成对删除） |
 | GET | `/api/households/{id}/statistics/overview` | 家庭总览 |
