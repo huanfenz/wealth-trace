@@ -308,6 +308,7 @@ WEALTH_TRACE_CONFIG=/path/to/config.json ./build/backend/wealth-trace
 
 ## 11. 设计文档与实现说明
 
+- MCP 接入：[`docs/MCP.md`](./docs/MCP.md)
 - 需求与总体设计：[`家庭资产管理系统-需求分析与总体设计-V1.md`](./家庭资产管理系统-需求分析与总体设计-V1.md)
 - 实现中发现的设计问题与处理：[`docs/设计问题说明.md`](./docs/设计问题说明.md)
 - API 明细：[`docs/API.md`](./docs/API.md)

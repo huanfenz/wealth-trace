@@ -2,6 +2,8 @@
 /build/
 /frontend/dist/
 /frontend/node_modules/
+/mcp/node_modules/
+/mcp/dist/
 
 # Runtime data (SQLite database and WAL files)
 /data/*
