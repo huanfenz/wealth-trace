@@ -54,11 +54,11 @@ def main():
                  "opening_balance": 2000000})
     assert cash["current_balance"] == 2000000
 
-    fund = call("POST", f"/api/households/{household_id}/assets",
-                {"account_id": account_id, "name": "某基金", "asset_type": "FUND",
+    stock_fund = call("POST", f"/api/households/{household_id}/assets",
+                {"account_id": account_id, "name": "某股票基金", "asset_type": "STOCK_FUND",
                  "opening_balance": 5000000,
-                 "fund": {"fund_code": "000001", "fund_type": "BOND"}})
-    assert fund["fund"]["fund_code"] == "000001"
+                 "stock_fund": {"fund_code": "000001"}})
+    assert stock_fund["stock_fund"]["fund_code"] == "000001"
 
     call("POST", f"/api/households/{household_id}/transactions/income",
          {"asset_id": cash["id"], "category": "工资", "amount": 1000000})
@@ -69,12 +69,12 @@ def main():
     assert after["current_balance"] == 2000000 + 1000000 - 3500, after
 
     transfer = call("POST", f"/api/households/{household_id}/transfers",
-                    {"from_asset_id": cash["id"], "to_asset_id": fund["id"],
+                    {"from_asset_id": cash["id"], "to_asset_id": stock_fund["id"],
                      "amount": 500000})
     assert transfer["outgoing"]["transfer_group_id"] == transfer["incoming"]["transfer_group_id"]
 
     cash_after = call("GET", f"/api/assets/{cash['id']}")
-    fund_after = call("GET", f"/api/assets/{fund['id']}")
+    fund_after = call("GET", f"/api/assets/{stock_fund['id']}")
     assert cash_after["current_balance"] == 2000000 + 1000000 - 3500 - 500000
     assert fund_after["current_balance"] == 5000000 + 500000
 

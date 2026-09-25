@@ -12,9 +12,10 @@ export type AccountType =
 export type AssetType =
   | 'CASH' // 现金/活期
   | 'TERM_DEPOSIT' // 定期存款（有 term_deposit 明细）
-  | 'FUND' // 基金（有 fund 明细）
-  | 'BOND' // 债券（有 bond 明细）
+  | 'STOCK_FUND' // 股票基金（有 stock_fund 明细）
   | 'BOND_FUND' // 债券基金（有 bond_fund 明细）
+  | 'FLEXIBLE_TERM' // 定活理财
+  | 'COMMERCIAL_PENSION' // 商业养老金
   | 'INSURANCE' // 保险（有 insurance 明细）
   | 'LIABILITY' // 负债
   | 'OTHER' // 其他
@@ -79,22 +80,11 @@ export interface TermDepositDetail {
   days_until_maturity: number | null // 距到期天数（后端按业务日期计算，可空）
 }
 
-/** 基金明细（Asset 的子结构）。 */
-export interface FundDetail {
+/** 股票基金明细（Asset 的子结构）。 */
+export interface StockFundDetail {
   asset_id: number
   fund_code: string | null // 基金代码（可空）
-  fund_type: string | null // 基金类型（可空）
   lock_start_date: string | null // 锁定期开始（可空）
-  lock_end_date: string | null // 锁定期结束（可空）
-}
-
-/** 债券明细（Asset 的子结构）。 */
-export interface BondDetail {
-  asset_id: number
-  bond_code: string | null // 债券代码（可空）
-  annual_coupon_rate: number // 票面年利率（1000000 定点）
-  purchase_date: string | null // 购买日期（可空）
-  maturity_date: string | null // 到期日期（可空）
   lock_end_date: string | null // 锁定期结束（可空）
 }
 
@@ -111,6 +101,28 @@ export interface BondFundDetail {
   maturity_date: string | null // 产品最终到期日（可空）
   status: string // 后端按业务日期推导的状态：LOCKED/REDEEMABLE/REDEEMABLE_TODAY/PENDING
   days_until_redeem: number | null // 距可赎回天数（后端按业务日期计算，可空）
+}
+
+export interface FlexibleTermDetail {
+  asset_id: number
+  purchase_date: string
+  holding_period_days: 180 | 360
+  maturity_date: string
+  next_transfer_date: string
+  can_transfer: boolean
+}
+
+export interface CommercialPensionDetail {
+  asset_id: number
+  purchase_time: string
+  holding_period_value: number
+  holding_period_unit: TermUnit
+  reservation_window_start: string | null
+  reservation_window_end: string | null
+  redeem_at_maturity: boolean
+  maturity_time: string
+  reservation_status: 'NOT_SET' | 'UPCOMING' | 'OPEN' | 'ENDED'
+  status: 'ACTIVE' | 'MATURED'
 }
 
 /** 保险明细（Asset 的子结构）。 */
@@ -141,9 +153,10 @@ export interface Asset {
   status: AssetStatus
   remark: string | null // 备注（可空）
   term_deposit: TermDepositDetail | null // 定期存款明细（仅 TERM_DEPOSIT）
-  fund: FundDetail | null // 基金明细（仅 FUND）
-  bond: BondDetail | null // 债券明细（仅 BOND）
+  stock_fund: StockFundDetail | null // 股票基金明细（仅 STOCK_FUND）
   bond_fund: BondFundDetail | null // 债券基金明细（仅 BOND_FUND）
+  flexible_term: FlexibleTermDetail | null
+  commercial_pension: CommercialPensionDetail | null
   insurance: InsuranceDetail | null // 保险明细（仅 INSURANCE）
   created_at: string
   updated_at: string

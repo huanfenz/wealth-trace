@@ -2,7 +2,7 @@
 
 // DTO 序列化：把领域实体 / 查询结果转换为对外 JSON。
 // 约束：金额字段单位均为「分」（整数）；负债金额以负值表示；
-// 可选字段无值时输出 null；明细块（term_deposit/fund/bond/insurance）
+// 可选字段无值时输出 null；明细块（term_deposit/stock_fund/bond/insurance）
 // 与资产类型不匹配时输出 null。
 #include <nlohmann/json.hpp>
 
@@ -28,15 +28,15 @@ nlohmann::json to_json(const AccountView& view);
 nlohmann::json to_json(const Asset& asset);
 // 定期存款明细（利率为定点整数 RATE_SCALE=1000000）。
 nlohmann::json to_json(const TermDepositDetail& detail);
-// 基金明细。
-nlohmann::json to_json(const FundDetail& detail);
-// 债券明细（利率为定点整数）。
-nlohmann::json to_json(const BondDetail& detail);
+// 股票基金明细。
+nlohmann::json to_json(const StockFundDetail& detail);
 // 债券基金明细（持有方式、赎回日期；收益率为定点整数）。
 nlohmann::json to_json(const BondFundDetail& detail);
+nlohmann::json to_json(const FlexibleTermDetail& detail);
+nlohmann::json to_json(const CommercialPensionDetail& detail);
 // 保险明细（金额单位均为分）。
 nlohmann::json to_json(const InsuranceDetail& detail);
-// 资产聚合包：资产基础信息 + 四个明细块（不适用的明细块为 null）。
+// 资产聚合包：资产基础信息 + 各类型明细块（不适用的明细块为 null）。
 nlohmann::json to_json(const AssetBundle& bundle);
 // 创建资产时的「添加时维护」预览（不落库）。
 nlohmann::json to_json(const CreateMaintenancePreview& preview);

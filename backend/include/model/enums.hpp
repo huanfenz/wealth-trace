@@ -16,7 +16,7 @@ namespace wt {
 enum class MemberRole { Owner, Member };
 enum class MemberStatus { Active, Inactive };
 enum class AccountType { Bank, Alipay, Wechat, Cash, Securities, Insurance, Other };
-enum class AssetType { Cash, TermDeposit, Fund, Bond, BondFund, Insurance, Liability, Other };
+enum class AssetType { Cash, TermDeposit, StockFund, BondFund, FlexibleTerm, CommercialPension, Insurance, Liability, Other };
 enum class AssetStatus { Active, Closed };
 enum class TransactionType { Income, Expense, TransferIn, TransferOut, Adjustment };
 enum class TransactionStatus { Normal, Void };

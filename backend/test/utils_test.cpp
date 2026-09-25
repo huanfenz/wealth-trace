@@ -5,10 +5,64 @@
 #include "utils/rate.hpp"
 #include "utils/term_date.hpp"
 #include "utils/time_util.hpp"
+#include "utils/flexible_term.hpp"
+#include "utils/commercial_pension.hpp"
 
 namespace {
 
 using namespace wt;
+
+TEST(CommercialPensionTest, RenewsOnMaturityAndLocksRedemption) {
+  CommercialPensionDetail detail;
+  detail.purchase_time = "2026-01-31 12:30:00";
+  detail.holding_period_value = 1;
+  detail.holding_period_unit = TermUnit::Month;
+  EXPECT_EQ(commercial_pension::current_maturity(detail, "2026-02-27 00:00:00"),
+            "2026-02-28 12:30:00");
+  EXPECT_EQ(commercial_pension::selectable_maturity(detail, "2026-02-28 12:30:00"),
+            "2026-02-28 12:30:00");
+  EXPECT_EQ(commercial_pension::current_maturity(detail, "2026-02-28 12:30:00"),
+            "2026-03-28 12:30:00");
+  detail.redeem_at_maturity = true;
+  detail.redeem_at = "2026-02-28 12:30:00";
+  EXPECT_EQ(commercial_pension::current_maturity(detail, "2026-04-01 00:00:00"),
+            "2026-02-28 12:30:00");
+}
+
+TEST(CommercialPensionTest, ReservationReminderIncludesEndpoints) {
+  CommercialPensionDetail detail;
+  EXPECT_EQ(commercial_pension::reservation_status(detail, "2026-02-01 09:00:00"), "NOT_SET");
+  detail.reservation_window_start = "2026-02-01 09:00:00";
+  detail.reservation_window_end = "2026-02-03 17:00:00";
+  EXPECT_EQ(commercial_pension::reservation_status(detail, "2026-02-01 08:59:59"), "UPCOMING");
+  EXPECT_EQ(commercial_pension::reservation_status(detail, "2026-02-01 09:00:00"), "OPEN");
+  EXPECT_EQ(commercial_pension::reservation_status(detail, "2026-02-03 17:00:00"), "OPEN");
+  EXPECT_EQ(commercial_pension::reservation_status(detail, "2026-02-03 17:00:01"), "ENDED");
+}
+
+TEST(FlexibleTermTest, MonthlyOpeningAndMaturity) {
+  FlexibleTermDetail detail;
+  detail.purchase_date = "2026-01-04";
+  detail.holding_period_days = 180;
+  EXPECT_EQ(flexible_term::next_transfer_date(detail, "2026-02-02"), "2026-02-05");
+  EXPECT_EQ(flexible_term::next_transfer_date(detail, "2026-02-05"), "2026-02-05");
+  EXPECT_EQ(flexible_term::next_transfer_date(detail, "2026-02-06"), "2026-03-05");
+  EXPECT_FALSE(flexible_term::can_transfer(detail, "2026-02-04"));
+  EXPECT_TRUE(flexible_term::can_transfer(detail, "2026-02-05"));
+  const auto maturity = flexible_term::maturity_date(detail);
+  EXPECT_TRUE(flexible_term::can_transfer(detail, maturity));
+  EXPECT_TRUE(flexible_term::can_transfer(detail, time_util::add_days(maturity, 1)));
+}
+
+TEST(FlexibleTermTest, ThirtyDayThresholdOnFifth) {
+  FlexibleTermDetail detail;
+  detail.purchase_date = "2026-01-06"; // 满 30 天正好为 2 月 5 日
+  detail.holding_period_days = 360;
+  EXPECT_EQ(flexible_term::next_transfer_date(detail, "2026-02-04"), "2026-02-05");
+  EXPECT_TRUE(flexible_term::can_transfer(detail, "2026-02-05"));
+  detail.purchase_date = "2026-01-07"; // 2 月 5 日尚未满 30 天
+  EXPECT_EQ(flexible_term::next_transfer_date(detail, "2026-02-05"), "2026-03-05");
+}
 
 // 验证金额（单位：分）格式化输出为人民币字符串，含小数与负数处理。
 TEST(MoneyTest, FormatsMinorUnits) {

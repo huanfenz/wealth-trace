@@ -146,7 +146,7 @@ export function updateAssetStatus(id: number, status: string): Promise<Asset> {
   return put<Asset>(`/assets/${id}/status`, { status })
 }
 
-/** 更新资产对应类型的明细块（定期/基金/债券/保险）。 */
+/** 更新资产对应类型的明细块（定期/股票基金/债券/保险）。 */
 export function updateAssetDetail(
   id: number,
   body: Record<string, unknown>,

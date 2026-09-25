@@ -12,6 +12,8 @@
 #include "database/transaction.hpp"
 #include "utils/strings.hpp"
 #include "utils/time_util.hpp"
+#include "utils/flexible_term.hpp"
+#include "utils/commercial_pension.hpp"
 
 namespace wt {
 namespace {
@@ -170,6 +172,21 @@ TransferResult TransactionService::transfer(std::int64_t household_id,
   // 两端都必须在用，已关闭的资产不能转出也不能转入。
   if (from->status != AssetStatus::Active || to->status != AssetStatus::Active) {
     throw conflict("transfer requires both assets to be active");
+  }
+  if (from->asset_type == AssetType::FlexibleTerm) {
+    const auto detail = assets_.find_flexible_term_detail(from->id);
+    if (!detail.has_value() ||
+        !flexible_term::can_transfer(*detail, time_util::business_today())) {
+      throw conflict("flexible term asset is not open for transfer today");
+    }
+  }
+  if (from->asset_type == AssetType::CommercialPension) {
+    const auto detail = assets_.find_commercial_pension_detail(from->id);
+    const auto now = time_util::utc_to_business(time_util::now_iso8601());
+    if (!detail.has_value() || !detail->redeem_at_maturity ||
+        !detail->redeem_at.has_value() || now < *detail->redeem_at) {
+      throw conflict("commercial pension is not yet available for redemption");
+    }
   }
 
   const std::string now = time_util::now_iso8601();

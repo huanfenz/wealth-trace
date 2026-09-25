@@ -56,22 +56,22 @@ MaintenancePlan DailyAssetMaintenanceService::preview() {
   MaintenancePlan plan;
   plan.business_date = today;
 
-  for (const auto& fund : assets_.list_rolling_bond_funds()) {
+  for (const auto& bond_fund : assets_.list_rolling_bond_funds()) {
     // 滚动型正常都有 next_redeem_date；缺失数据直接跳过，不臆造。
-    if (!fund.next_redeem_date.has_value()) {
+    if (!bond_fund.next_redeem_date.has_value()) {
       continue;
     }
     const auto advanced = maintenance_rules::advance_bond_fund_next(
-        *fund.next_redeem_date, fund.holding_period_days, today);
+        *bond_fund.next_redeem_date, bond_fund.holding_period_days, today);
     if (!advanced.has_value()) {
       continue;
     }
     MaintenanceChange change;
-    change.asset_id = fund.asset_id;
-    change.asset_name = asset_name(fund.asset_id);
+    change.asset_id = bond_fund.asset_id;
+    change.asset_name = asset_name(bond_fund.asset_id);
     change.asset_type = "BOND_FUND";
     change.field = "next_redeem_date";
-    change.before = *fund.next_redeem_date;
+    change.before = *bond_fund.next_redeem_date;
     change.after = *advanced;
     plan.changes.push_back(std::move(change));
   }
@@ -107,16 +107,16 @@ std::string DailyAssetMaintenanceService::asset_name(std::int64_t asset_id) {
 
 std::int64_t DailyAssetMaintenanceService::update_bond_funds(const std::string& today) {
   std::int64_t updated = 0;
-  for (const auto& fund : assets_.list_rolling_bond_funds()) {
-    if (!fund.next_redeem_date.has_value()) {
+  for (const auto& bond_fund : assets_.list_rolling_bond_funds()) {
+    if (!bond_fund.next_redeem_date.has_value()) {
       continue;
     }
     const auto advanced = maintenance_rules::advance_bond_fund_next(
-        *fund.next_redeem_date, fund.holding_period_days, today);
+        *bond_fund.next_redeem_date, bond_fund.holding_period_days, today);
     if (!advanced.has_value()) {
       continue;
     }
-    assets_.update_bond_fund_next_redeem_date(fund.asset_id, *advanced);
+    assets_.update_bond_fund_next_redeem_date(bond_fund.asset_id, *advanced);
     ++updated;
   }
   return updated;

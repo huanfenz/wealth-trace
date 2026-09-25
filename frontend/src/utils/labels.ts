@@ -25,9 +25,10 @@ export const accountTypeLabels: Record<AccountType, string> = {
 export const assetTypeLabels: Record<AssetType, string> = {
   CASH: '现金/活期',
   TERM_DEPOSIT: '定期存款',
-  FUND: '基金',
-  BOND: '债券',
+  STOCK_FUND: '股票基金',
   BOND_FUND: '债券基金',
+  FLEXIBLE_TERM: '定活理财',
+  COMMERCIAL_PENSION: '商业养老金',
   INSURANCE: '保险',
   LIABILITY: '负债',
   OTHER: '其他',

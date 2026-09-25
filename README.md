@@ -74,7 +74,7 @@ wealth-trace/
 │   ├── src/{api,components,views,router,stores,types,utils}/
 │   └── vite.config.ts          # /api 代理到后端
 │
-├── migrations/                 # SQL migration（001_init / 002_default_institution / 003_bond_fund）
+├── migrations/                 # SQL migration（001–010，含资产类型与明细字段调整）
 ├── data/                       # SQLite 数据库文件（运行时生成）
 ├── docs/                       # API 与设计问题说明
 └── scripts/                    # 冒烟测试脚本
@@ -322,4 +322,11 @@ WEALTH_TRACE_CONFIG=/path/to/config.json ./build/backend/wealth-trace
 `start_date`；到期状态同样不落库，实时推导并返回 `status` / `days_until_maturity`。
 详见 [`docs/设计问题说明.md`](./docs/设计问题说明.md) 第 17 节。
 
-> V1 范围说明：不包含复杂权限、私人账单、复式记账、基金份额/净值、行情同步、AI 记账等。
+定活理财（`FLEXIBLE_TERM`）：选择 180 或 360 天持有期。申购确认满 30 个自然日后，
+每月 5 日开放转出；持有期满后每天可转出。资产页显示下一次可转出日期，转账接口校验开放日。
+
+商业养老金（`COMMERCIAL_PENSION`）：填写买入时间及持有周期（天、月、年），默认到期续期。
+可设置预约赎回的日期时间提醒范围；它不限制修改到期处理方式。用户可选择到期赎回，
+届时停止续期并允许转出。
+
+> V1 范围说明：不包含复杂权限、私人账单、复式记账、股票基金份额/净值、行情同步、AI 记账等。

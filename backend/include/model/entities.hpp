@@ -76,24 +76,12 @@ struct TermDepositDetail {
   std::optional<std::string> maturity_action; // 到期处理方式（可空）
 };
 
-// 基金扩展信息（asset_type = FUND 时使用）。基金名称统一使用 asset.name。
-struct FundDetail {
+// 股票基金扩展信息（asset_type = STOCK_FUND 时使用）。名称统一使用 asset.name。
+struct StockFundDetail {
   std::int64_t asset_id = 0;                   // 对应资产 id
   std::optional<std::string> fund_code;        // 基金代码（可空）
-  std::optional<std::string> fund_type;        // 基金类型（可空）
   std::optional<std::string> lock_start_date;  // 锁定期开始日 "YYYY-MM-DD"（可空）
   std::optional<std::string> lock_end_date;    // 锁定期结束日 "YYYY-MM-DD"（可空）
-};
-
-// 债券扩展信息（asset_type = BOND 时使用）。
-// 债券名称统一使用 asset.name；本金统一以 asset.opening_balance 为准。
-struct BondDetail {
-  std::int64_t asset_id = 0;                 // 对应资产 id
-  std::optional<std::string> bond_code;      // 债券代码（可空）
-  std::int64_t annual_coupon_rate = 0;       // 年票息率，定点整数，RATE_SCALE=1000000
-  std::optional<std::string> purchase_date;  // 买入日 "YYYY-MM-DD"（可空）
-  std::optional<std::string> maturity_date;  // 到期日 "YYYY-MM-DD"（可空）
-  std::optional<std::string> lock_end_date;  // 锁定期结束日 "YYYY-MM-DD"（可空）
 };
 
 // 债券基金扩展信息（asset_type = BOND_FUND 时使用）。
@@ -111,6 +99,25 @@ struct BondFundDetail {
   std::optional<std::string> first_redeem_date;       // 首次可赎回日期 "YYYY-MM-DD"（可空）
   std::optional<std::string> next_redeem_date;        // 下一次可赎回日期，仅 ROLLING（可空）
   std::optional<std::string> maturity_date;           // 产品最终到期日（可空）
+};
+
+// 定活理财：申购确认日 + 180/360 自然日为持有期满日；满 30 日后每月 5 日开放转出。
+struct FlexibleTermDetail {
+  std::int64_t asset_id = 0;
+  std::string purchase_date;
+  std::int64_t holding_period_days = 180;
+};
+
+// 商业养老金：本地业务时间。默认自动续期；预约范围用于提醒，不限制修改。
+struct CommercialPensionDetail {
+  std::int64_t asset_id = 0;
+  std::string purchase_time;                    // YYYY-MM-DD HH:MM:SS，业务时区
+  std::int64_t holding_period_value = 0;
+  TermUnit holding_period_unit = TermUnit::Year;
+  std::optional<std::string> reservation_window_start;
+  std::optional<std::string> reservation_window_end;
+  bool redeem_at_maturity = false;              // false=到期续期（默认），true=到期赎回
+  std::optional<std::string> redeem_at;         // 切换到赎回时锁定的到期时间
 };
 
 // 保险扩展信息（asset_type = INSURANCE 时使用）。

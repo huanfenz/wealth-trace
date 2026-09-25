@@ -13,6 +13,7 @@
 #include "utils/strings.hpp"
 #include "utils/term_date.hpp"
 #include "utils/time_util.hpp"
+#include "utils/commercial_pension.hpp"
 
 namespace wt {
 namespace {
@@ -45,18 +46,20 @@ void validate_opening_balance(AssetType type, std::int64_t opening_balance) {
 // asset_type（用于后续「明细必须与 asset_type 一致」的校验）。
 AssetType detail_type_of(const AssetCreateInput& input) {
   if (input.term_deposit.has_value()) return AssetType::TermDeposit;
-  if (input.fund.has_value()) return AssetType::Fund;
-  if (input.bond.has_value()) return AssetType::Bond;
+  if (input.stock_fund.has_value()) return AssetType::StockFund;
   if (input.bond_fund.has_value()) return AssetType::BondFund;
+  if (input.flexible_term.has_value()) return AssetType::FlexibleTerm;
+  if (input.commercial_pension.has_value()) return AssetType::CommercialPension;
   if (input.insurance.has_value()) return AssetType::Insurance;
   return input.asset_type;
 }
 
 // 统计入参里提供了几个明细块（用于「一次只能提供一个」的约束）。
 int count_provided_details(const AssetCreateInput& input) {
-  return (input.term_deposit.has_value() ? 1 : 0) + (input.fund.has_value() ? 1 : 0) +
-         (input.bond.has_value() ? 1 : 0) + (input.bond_fund.has_value() ? 1 : 0) +
-         (input.insurance.has_value() ? 1 : 0);
+  return (input.term_deposit.has_value() ? 1 : 0) + (input.stock_fund.has_value() ? 1 : 0) +
+         (input.bond_fund.has_value() ? 1 : 0) +
+         (input.insurance.has_value() ? 1 : 0) + (input.flexible_term.has_value() ? 1 : 0) +
+         (input.commercial_pension.has_value() ? 1 : 0);
 }
 
 // 校验并补全债券基金的赎回日期。规则见「BOND_FUND 债券基金最终实现方案」：
@@ -115,12 +118,50 @@ void normalize_term_deposit(TermDepositDetail& detail) {
   }
 }
 
+void normalize_flexible_term(FlexibleTermDetail& detail) {
+  detail.purchase_date = time_util::require_date(detail.purchase_date, "purchase_date");
+  if (detail.holding_period_days != 180 && detail.holding_period_days != 360) {
+    throw invalid_request("flexible term holding_period_days must be 180 or 360");
+  }
+}
+
+void normalize_commercial_pension(CommercialPensionDetail& detail,
+                                  const std::optional<CommercialPensionDetail>& existing) {
+  detail.purchase_time = time_util::require_datetime(detail.purchase_time, "purchase_time");
+  if (detail.holding_period_value <= 0 || detail.holding_period_value > 10000) {
+    throw invalid_request("holding_period_value must be between 1 and 10000");
+  }
+  if (detail.reservation_window_start.has_value() != detail.reservation_window_end.has_value()) {
+    throw invalid_request("reservation window requires both start and end");
+  }
+  if (detail.reservation_window_start.has_value()) {
+    *detail.reservation_window_start = time_util::require_datetime(
+        *detail.reservation_window_start, "reservation_window_start");
+    *detail.reservation_window_end = time_util::require_datetime(
+        *detail.reservation_window_end, "reservation_window_end");
+    if (*detail.reservation_window_start > *detail.reservation_window_end) {
+      throw invalid_request("reservation window start must not exceed end");
+    }
+  }
+  const auto now = time_util::utc_to_business(time_util::now_iso8601());
+  if (!detail.redeem_at_maturity) {
+    detail.redeem_at = std::nullopt;
+  } else if (!existing.has_value() || !existing->redeem_at_maturity ||
+             detail.purchase_time != existing->purchase_time ||
+             detail.holding_period_value != existing->holding_period_value ||
+             detail.holding_period_unit != existing->holding_period_unit) {
+    detail.redeem_at = commercial_pension::selectable_maturity(detail, now);
+  } else {
+    detail.redeem_at = existing->redeem_at;
+  }
+}
+
 }  // namespace
 
 void AssetService::validate_detail_combination(const Asset& asset,
                                                const AssetCreateInput& input) const {
   // 一个资产最多一份明细；有明细时其类型必须与 asset_type 完全一致，
-  // 否则会出现「资产是基金却挂了债券明细」这类不一致数据。
+  // 否则会出现「股票基金资产却挂了债券明细」这类不一致数据。
   if (count_provided_details(input) > 1) {
     throw invalid_request("only one detail block may be supplied per asset");
   }
@@ -159,6 +200,12 @@ AssetBundle AssetService::create(std::int64_t household_id, const AssetCreateInp
   asset.updated_at = asset.created_at;
 
   validate_detail_combination(asset, input);
+  if (asset.asset_type == AssetType::FlexibleTerm && !input.flexible_term.has_value()) {
+    throw invalid_request("flexible_term detail is required");
+  }
+  if (asset.asset_type == AssetType::CommercialPension && !input.commercial_pension.has_value()) {
+    throw invalid_request("commercial_pension detail is required");
+  }
 
   // 资产本体与明细分属两张表，必须在同一事务内写入：任一失败则整体回滚，
   // 不会留下「有资产无明细」或「有明细无资产」的中间态。
@@ -180,15 +227,10 @@ AssetBundle AssetService::create(std::int64_t household_id, const AssetCreateInp
     }
     assets_.upsert_term_deposit_detail(detail);
   }
-  if (input.fund.has_value()) {
-    FundDetail detail = *input.fund;
+  if (input.stock_fund.has_value()) {
+    StockFundDetail detail = *input.stock_fund;
     detail.asset_id = asset.id;
-    assets_.upsert_fund_detail(detail);
-  }
-  if (input.bond.has_value()) {
-    BondDetail detail = *input.bond;
-    detail.asset_id = asset.id;
-    assets_.upsert_bond_detail(detail);
+    assets_.upsert_stock_fund_detail(detail);
   }
   if (input.bond_fund.has_value()) {
     BondFundDetail detail = *input.bond_fund;
@@ -208,6 +250,18 @@ AssetBundle AssetService::create(std::int64_t household_id, const AssetCreateInp
     InsuranceDetail detail = *input.insurance;
     detail.asset_id = asset.id;
     assets_.upsert_insurance_detail(detail);
+  }
+  if (input.flexible_term.has_value()) {
+    FlexibleTermDetail detail = *input.flexible_term;
+    detail.asset_id = asset.id;
+    normalize_flexible_term(detail);
+    assets_.upsert_flexible_term_detail(detail);
+  }
+  if (input.commercial_pension.has_value()) {
+    CommercialPensionDetail detail = *input.commercial_pension;
+    detail.asset_id = asset.id;
+    normalize_commercial_pension(detail, std::nullopt);
+    assets_.upsert_commercial_pension_detail(detail);
   }
   transaction.commit();
 
@@ -288,14 +342,17 @@ AssetBundle AssetService::load_bundle(const Asset& asset) {
     case AssetType::TermDeposit:
       bundle.term_deposit = assets_.find_term_deposit_detail(asset.id);
       break;
-    case AssetType::Fund:
-      bundle.fund = assets_.find_fund_detail(asset.id);
-      break;
-    case AssetType::Bond:
-      bundle.bond = assets_.find_bond_detail(asset.id);
+    case AssetType::StockFund:
+      bundle.stock_fund = assets_.find_stock_fund_detail(asset.id);
       break;
     case AssetType::BondFund:
       bundle.bond_fund = assets_.find_bond_fund_detail(asset.id);
+      break;
+    case AssetType::FlexibleTerm:
+      bundle.flexible_term = assets_.find_flexible_term_detail(asset.id);
+      break;
+    case AssetType::CommercialPension:
+      bundle.commercial_pension = assets_.find_commercial_pension_detail(asset.id);
       break;
     case AssetType::Insurance:
       bundle.insurance = assets_.find_insurance_detail(asset.id);
@@ -355,8 +412,10 @@ Asset AssetService::update_status(std::int64_t id, AssetStatus status) {
 
 AssetBundle AssetService::update_detail(std::int64_t id, AssetType detail_type,
                                         const TermDepositDetail* term_deposit,
-                                        const FundDetail* fund, const BondDetail* bond,
+                                        const StockFundDetail* stock_fund,
                                         const BondFundDetail* bond_fund,
+                                        const FlexibleTermDetail* flexible_term,
+                                        const CommercialPensionDetail* commercial_pension,
                                         const InsuranceDetail* insurance) {
   std::scoped_lock lock(database_.mutex());
   Asset asset = get(id);
@@ -377,22 +436,13 @@ AssetBundle AssetService::update_detail(std::int64_t id, AssetType detail_type,
       assets_.upsert_term_deposit_detail(detail);
       break;
     }
-    case AssetType::Fund: {
-      if (fund == nullptr) {
-        throw invalid_request("fund detail is required");
+    case AssetType::StockFund: {
+      if (stock_fund == nullptr) {
+        throw invalid_request("stock_fund detail is required");
       }
-      FundDetail detail = *fund;
+      StockFundDetail detail = *stock_fund;
       detail.asset_id = id;
-      assets_.upsert_fund_detail(detail);
-      break;
-    }
-    case AssetType::Bond: {
-      if (bond == nullptr) {
-        throw invalid_request("bond detail is required");
-      }
-      BondDetail detail = *bond;
-      detail.asset_id = id;
-      assets_.upsert_bond_detail(detail);
+      assets_.upsert_stock_fund_detail(detail);
       break;
     }
     case AssetType::BondFund: {
@@ -418,6 +468,24 @@ AssetBundle AssetService::update_detail(std::int64_t id, AssetType detail_type,
       InsuranceDetail detail = *insurance;
       detail.asset_id = id;
       assets_.upsert_insurance_detail(detail);
+      break;
+    }
+    case AssetType::FlexibleTerm: {
+      if (flexible_term == nullptr) throw invalid_request("flexible_term detail is required");
+      FlexibleTermDetail detail = *flexible_term;
+      detail.asset_id = id;
+      normalize_flexible_term(detail);
+      assets_.upsert_flexible_term_detail(detail);
+      break;
+    }
+    case AssetType::CommercialPension: {
+      if (commercial_pension == nullptr) {
+        throw invalid_request("commercial_pension detail is required");
+      }
+      CommercialPensionDetail detail = *commercial_pension;
+      detail.asset_id = id;
+      normalize_commercial_pension(detail, assets_.find_commercial_pension_detail(id));
+      assets_.upsert_commercial_pension_detail(detail);
       break;
     }
     default:

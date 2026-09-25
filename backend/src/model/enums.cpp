@@ -33,8 +33,10 @@ constexpr std::pair<std::string_view, AccountType> kAccountTypes[] = {
     {"OTHER", AccountType::Other}};
 constexpr std::pair<std::string_view, AssetType> kAssetTypes[] = {
     {"CASH", AssetType::Cash},           {"TERM_DEPOSIT", AssetType::TermDeposit},
-    {"FUND", AssetType::Fund},           {"BOND", AssetType::Bond},
+    {"STOCK_FUND", AssetType::StockFund},
     {"BOND_FUND", AssetType::BondFund},  {"INSURANCE", AssetType::Insurance},
+    {"FLEXIBLE_TERM", AssetType::FlexibleTerm},
+    {"COMMERCIAL_PENSION", AssetType::CommercialPension},
     {"LIABILITY", AssetType::Liability}, {"OTHER", AssetType::Other}};
 constexpr std::pair<std::string_view, AssetStatus> kAssetStatuses[] = {
     {"ACTIVE", AssetStatus::Active}, {"CLOSED", AssetStatus::Closed}};
@@ -77,9 +79,10 @@ std::string_view to_string(AssetType value) {
   switch (value) {
     case AssetType::Cash: return "CASH";
     case AssetType::TermDeposit: return "TERM_DEPOSIT";
-    case AssetType::Fund: return "FUND";
-    case AssetType::Bond: return "BOND";
+    case AssetType::StockFund: return "STOCK_FUND";
     case AssetType::BondFund: return "BOND_FUND";
+    case AssetType::FlexibleTerm: return "FLEXIBLE_TERM";
+    case AssetType::CommercialPension: return "COMMERCIAL_PENSION";
     case AssetType::Insurance: return "INSURANCE";
     case AssetType::Liability: return "LIABILITY";
     case AssetType::Other: return "OTHER";

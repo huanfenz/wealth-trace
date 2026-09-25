@@ -8,6 +8,8 @@
 #include <nlohmann/json.hpp>
 
 #include "utils/time_util.hpp"
+#include "utils/flexible_term.hpp"
+#include "utils/commercial_pension.hpp"
 
 namespace wt::dto {
 namespace {
@@ -164,22 +166,11 @@ nlohmann::json to_json(const TermDepositDetail& detail) {
   return json;
 }
 
-// 基金明细：代码 / 类型与锁定期起止日期均可选；名称统一使用 asset.name。
-nlohmann::json to_json(const FundDetail& detail) {
+// 股票基金明细：代码与锁定期起止日期均可选；名称统一使用 asset.name。
+nlohmann::json to_json(const StockFundDetail& detail) {
   return {{"asset_id", detail.asset_id},
           {"fund_code", optional_text(detail.fund_code)},
-          {"fund_type", optional_text(detail.fund_type)},
           {"lock_start_date", optional_text(detail.lock_start_date)},
-          {"lock_end_date", optional_text(detail.lock_end_date)}};
-}
-
-// 债券明细：annual_coupon_rate 票面利率（定点整数）；名称用 asset.name，本金用 opening_balance。
-nlohmann::json to_json(const BondDetail& detail) {
-  return {{"asset_id", detail.asset_id},
-          {"bond_code", optional_text(detail.bond_code)},
-          {"annual_coupon_rate", detail.annual_coupon_rate},
-          {"purchase_date", optional_text(detail.purchase_date)},
-          {"maturity_date", optional_text(detail.maturity_date)},
           {"lock_end_date", optional_text(detail.lock_end_date)}};
 }
 
@@ -201,6 +192,32 @@ nlohmann::json to_json(const BondFundDetail& detail) {
           {"days_until_redeem", optional_int(bond_fund_days_until(detail, today))}};
 }
 
+nlohmann::json to_json(const FlexibleTermDetail& detail) {
+  const auto today = time_util::business_today();
+  const auto next = flexible_term::next_transfer_date(detail, today);
+  return {{"asset_id", detail.asset_id},
+          {"purchase_date", detail.purchase_date},
+          {"holding_period_days", detail.holding_period_days},
+          {"maturity_date", flexible_term::maturity_date(detail)},
+          {"next_transfer_date", next},
+          {"can_transfer", next == today}};
+}
+
+nlohmann::json to_json(const CommercialPensionDetail& detail) {
+  const auto now = time_util::utc_to_business(time_util::now_iso8601());
+  const auto maturity = commercial_pension::current_maturity(detail, now);
+  return {{"asset_id", detail.asset_id},
+          {"purchase_time", detail.purchase_time},
+          {"holding_period_value", detail.holding_period_value},
+          {"holding_period_unit", std::string(to_string(detail.holding_period_unit))},
+          {"reservation_window_start", optional_text(detail.reservation_window_start)},
+          {"reservation_window_end", optional_text(detail.reservation_window_end)},
+          {"redeem_at_maturity", detail.redeem_at_maturity},
+          {"maturity_time", maturity},
+          {"reservation_status", commercial_pension::reservation_status(detail, now)},
+          {"status", detail.redeem_at_maturity && now >= maturity ? "MATURED" : "ACTIVE"}};
+}
+
 // 保险明细：保费 / 已缴 / 保额均为「分」，payment_years 缴费年限可选。
 nlohmann::json to_json(const InsuranceDetail& detail) {
   return {{"asset_id", detail.asset_id},
@@ -216,17 +233,21 @@ nlohmann::json to_json(const InsuranceDetail& detail) {
           {"payment_years", optional_int(detail.payment_years)}};
 }
 
-// 资产聚合包：先展开资产基础信息，再挂四个明细块；
+// 资产聚合包：先展开资产基础信息，再挂对应明细块；
 // 资产类型用不到的明细块输出 null，前端据此展示对应编辑区。
 nlohmann::json to_json(const AssetBundle& bundle) {
   auto json = to_json(bundle.asset);
   json["term_deposit"] = bundle.term_deposit.has_value()
                              ? to_json(*bundle.term_deposit)
                              : nlohmann::json(nullptr);
-  json["fund"] = bundle.fund.has_value() ? to_json(*bundle.fund) : nlohmann::json(nullptr);
-  json["bond"] = bundle.bond.has_value() ? to_json(*bundle.bond) : nlohmann::json(nullptr);
+  json["stock_fund"] = bundle.stock_fund.has_value() ? to_json(*bundle.stock_fund) : nlohmann::json(nullptr);
   json["bond_fund"] = bundle.bond_fund.has_value() ? to_json(*bundle.bond_fund)
                                                     : nlohmann::json(nullptr);
+  json["flexible_term"] = bundle.flexible_term.has_value()
+                              ? to_json(*bundle.flexible_term) : nlohmann::json(nullptr);
+  json["commercial_pension"] = bundle.commercial_pension.has_value()
+                                    ? to_json(*bundle.commercial_pension)
+                                    : nlohmann::json(nullptr);
   json["insurance"] = bundle.insurance.has_value() ? to_json(*bundle.insurance)
                                                     : nlohmann::json(nullptr);
   return json;

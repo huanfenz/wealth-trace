@@ -27,6 +27,12 @@ std::optional<std::string> parse_date_field(const nlohmann::json& object, const 
   return time_util::require_date(*value, key);
 }
 
+std::optional<std::string> parse_datetime_field(const nlohmann::json& object, const char* key) {
+  const auto value = dto::optional_string(object, key, 19);
+  if (!value.has_value()) return std::nullopt;
+  return time_util::require_datetime(*value, key);
+}
+
 // 解析定期存款明细块：字段整体缺省或为 null 时返回 nullopt（表示不提供该明细）；
 // 存在则必须是对象，否则报参数错误。
 std::optional<TermDepositDetail> parse_term_deposit(const nlohmann::json& body) {
@@ -56,38 +62,18 @@ std::optional<TermDepositDetail> parse_term_deposit(const nlohmann::json& body) 
   return detail;
 }
 
-// 解析基金明细块：缺省 / null 返回 nullopt；存在则必须是对象。
-std::optional<FundDetail> parse_fund(const nlohmann::json& body) {
-  if (!body.contains("fund") || body.at("fund").is_null()) {
+// 解析股票基金明细块：缺省 / null 返回 nullopt；存在则必须是对象。
+std::optional<StockFundDetail> parse_stock_fund(const nlohmann::json& body) {
+  if (!body.contains("stock_fund") || body.at("stock_fund").is_null()) {
     return std::nullopt;
   }
-  const auto& object = body.at("fund");
+  const auto& object = body.at("stock_fund");
   if (!object.is_object()) {
-    throw invalid_request("fund must be an object");
+    throw invalid_request("stock_fund must be an object");
   }
-  FundDetail detail;
+  StockFundDetail detail;
   detail.fund_code = dto::optional_string(object, "fund_code", 32);
-  detail.fund_type = dto::optional_string(object, "fund_type", 32);
   detail.lock_start_date = parse_date_field(object, "lock_start_date", 10);
-  detail.lock_end_date = parse_date_field(object, "lock_end_date", 10);
-  return detail;
-}
-
-// 解析债券明细块：缺省 / null 返回 nullopt；存在则必须是对象。
-std::optional<BondDetail> parse_bond(const nlohmann::json& body) {
-  if (!body.contains("bond") || body.at("bond").is_null()) {
-    return std::nullopt;
-  }
-  const auto& object = body.at("bond");
-  if (!object.is_object()) {
-    throw invalid_request("bond must be an object");
-  }
-  BondDetail detail;
-  detail.bond_code = dto::optional_string(object, "bond_code", 32);
-  detail.annual_coupon_rate =
-      dto::optional_int64(object, "annual_coupon_rate").value_or(0);
-  detail.purchase_date = parse_date_field(object, "purchase_date", 10);
-  detail.maturity_date = parse_date_field(object, "maturity_date", 10);
   detail.lock_end_date = parse_date_field(object, "lock_end_date", 10);
   return detail;
 }
@@ -119,6 +105,36 @@ std::optional<BondFundDetail> parse_bond_fund(const nlohmann::json& body) {
   detail.first_redeem_date = parse_date_field(object, "first_redeem_date", 10);
   detail.next_redeem_date = parse_date_field(object, "next_redeem_date", 10);
   detail.maturity_date = parse_date_field(object, "maturity_date", 10);
+  return detail;
+}
+
+std::optional<FlexibleTermDetail> parse_flexible_term(const nlohmann::json& body) {
+  if (!body.contains("flexible_term") || body.at("flexible_term").is_null()) return std::nullopt;
+  const auto& object = body.at("flexible_term");
+  if (!object.is_object()) throw invalid_request("flexible_term must be an object");
+  FlexibleTermDetail detail;
+  detail.purchase_date = time_util::require_date(
+      dto::require_string(object, "purchase_date", 10), "purchase_date");
+  detail.holding_period_days = dto::require_int64(object, "holding_period_days");
+  return detail;
+}
+
+std::optional<CommercialPensionDetail> parse_commercial_pension(const nlohmann::json& body) {
+  if (!body.contains("commercial_pension") || body.at("commercial_pension").is_null()) {
+    return std::nullopt;
+  }
+  const auto& object = body.at("commercial_pension");
+  if (!object.is_object()) throw invalid_request("commercial_pension must be an object");
+  CommercialPensionDetail detail;
+  detail.purchase_time = time_util::require_datetime(
+      dto::require_string(object, "purchase_time", 19), "purchase_time");
+  detail.holding_period_value = dto::require_int64(object, "holding_period_value");
+  const auto unit = parse_term_unit(dto::require_string(object, "holding_period_unit", 16));
+  if (!unit.has_value()) throw invalid_request("holding_period_unit must be DAY, MONTH or YEAR");
+  detail.holding_period_unit = *unit;
+  detail.reservation_window_start = parse_datetime_field(object, "reservation_window_start");
+  detail.reservation_window_end = parse_datetime_field(object, "reservation_window_end");
+  detail.redeem_at_maturity = dto::optional_bool(object, "redeem_at_maturity", false);
   return detail;
 }
 
@@ -187,9 +203,10 @@ void AssetController::register_routes(crow::SimpleApp& app) {
           input.opening_balance = dto::optional_int64(body, "opening_balance").value_or(0);
           input.remark = dto::optional_string(body, "remark", 500);
           input.term_deposit = parse_term_deposit(body);
-          input.fund = parse_fund(body);
-          input.bond = parse_bond(body);
+          input.stock_fund = parse_stock_fund(body);
           input.bond_fund = parse_bond_fund(body);
+          input.flexible_term = parse_flexible_term(body);
+          input.commercial_pension = parse_commercial_pension(body);
           input.insurance = parse_insurance(body);
           // 添加时维护：前端预览并确认后置为 true，创建时推进过期日期。
           input.maintain_on_create = dto::optional_bool(body, "maintain_on_create", false);
@@ -207,9 +224,10 @@ void AssetController::register_routes(crow::SimpleApp& app) {
           AssetCreateInput input;
           input.asset_type = require_asset_type(body);
           input.term_deposit = parse_term_deposit(body);
-          input.fund = parse_fund(body);
-          input.bond = parse_bond(body);
+          input.stock_fund = parse_stock_fund(body);
           input.bond_fund = parse_bond_fund(body);
+          input.flexible_term = parse_flexible_term(body);
+          input.commercial_pension = parse_commercial_pension(body);
           input.insurance = parse_insurance(body);
           return dto::to_json(service_.preview_create_maintenance(input));
         });
@@ -261,14 +279,16 @@ void AssetController::register_routes(crow::SimpleApp& app) {
             throw invalid_request("invalid detail_type");
           }
           const auto term_deposit = parse_term_deposit(body);
-          const auto fund = parse_fund(body);
-          const auto bond = parse_bond(body);
+          const auto stock_fund = parse_stock_fund(body);
           const auto bond_fund = parse_bond_fund(body);
+          const auto flexible_term = parse_flexible_term(body);
+          const auto commercial_pension = parse_commercial_pension(body);
           const auto insurance = parse_insurance(body);
           return dto::to_json(service_.update_detail(
               id, *type, term_deposit ? &*term_deposit : nullptr,
-              fund ? &*fund : nullptr, bond ? &*bond : nullptr,
-              bond_fund ? &*bond_fund : nullptr,
+              stock_fund ? &*stock_fund : nullptr, bond_fund ? &*bond_fund : nullptr,
+              flexible_term ? &*flexible_term : nullptr,
+              commercial_pension ? &*commercial_pension : nullptr,
               insurance ? &*insurance : nullptr));
         });
       });

@@ -22,6 +22,7 @@
 #include "service/transaction_service.hpp"
 #include "utils/term_date.hpp"
 #include "utils/time_util.hpp"
+#include "utils/flexible_term.hpp"
 
 namespace {
 
@@ -77,6 +78,80 @@ class ServiceFixture : public ::testing::Test {
   Account account_;
 };
 
+TEST_F(ServiceFixture, FlexibleTermDetailAndTransferWindow) {
+  AssetService assets(database_);
+  AssetCreateInput input;
+  input.account_id = account_.id;
+  input.name = "定活理财";
+  input.asset_type = AssetType::FlexibleTerm;
+  input.opening_balance = 10000;
+  const auto today = time_util::business_today();
+  input.flexible_term = FlexibleTermDetail{0, time_util::add_days(today, -31), 180};
+  const auto created = assets.create(household_.id, input);
+  ASSERT_TRUE(created.flexible_term.has_value());
+  ASSERT_TRUE(assets.get_bundle(created.asset.id).flexible_term.has_value());
+  const auto target = make_asset("活期", AssetType::Cash, 0);
+  TransactionService transactions(database_);
+  if (flexible_term::can_transfer(*input.flexible_term, today)) {
+    EXPECT_NO_THROW(transactions.transfer(household_.id, created.asset.id, target.id,
+                                           100, business_noon_utc(), std::nullopt));
+  } else {
+    EXPECT_THROW(transactions.transfer(household_.id, created.asset.id, target.id,
+                                        100, business_noon_utc(), std::nullopt), ApiError);
+  }
+  input.flexible_term->purchase_date = time_util::add_days(today, -181);
+  input.name = "已满期定活理财";
+  const auto matured = assets.create(household_.id, input);
+  EXPECT_NO_THROW(transactions.transfer(household_.id, matured.asset.id, target.id,
+                                         100, business_noon_utc(), std::nullopt));
+  input.flexible_term->holding_period_days = 90;
+  EXPECT_THROW(assets.create(household_.id, input), ApiError);
+}
+
+TEST_F(ServiceFixture, CommercialPensionReservationWindowDoesNotRestrictAction) {
+  AssetService assets(database_);
+  AssetCreateInput input;
+  input.account_id = account_.id;
+  input.name = "商业养老金";
+  input.asset_type = AssetType::CommercialPension;
+  input.opening_balance = 10000;
+  const auto now = time_util::utc_to_business(time_util::now_iso8601());
+  CommercialPensionDetail detail;
+  detail.purchase_time = time_util::add_days(now.substr(0, 10), -10) + now.substr(10);
+  detail.holding_period_value = 1;
+  detail.holding_period_unit = TermUnit::Year;
+  detail.reservation_window_start = time_util::add_days(now.substr(0, 10), 1) + now.substr(10);
+  detail.reservation_window_end = time_util::add_days(now.substr(0, 10), 2) + now.substr(10);
+  input.commercial_pension = detail;
+  const auto created = assets.create(household_.id, input);
+  ASSERT_TRUE(created.commercial_pension.has_value());
+  EXPECT_FALSE(created.commercial_pension->redeem_at_maturity);
+  const auto target = make_asset("活期", AssetType::Cash, 0);
+  TransactionService transactions(database_);
+  EXPECT_THROW(transactions.transfer(household_.id, created.asset.id, target.id,
+      100, business_noon_utc(), std::nullopt), ApiError);
+  detail.redeem_at_maturity = true;
+  // 预约提醒尚未开始，但仍允许选择到期赎回。
+  const auto updated = assets.update_detail(created.asset.id, AssetType::CommercialPension,
+      nullptr, nullptr, nullptr, nullptr, &detail, nullptr);
+  ASSERT_TRUE(updated.commercial_pension.has_value());
+  EXPECT_TRUE(updated.commercial_pension->redeem_at_maturity);
+  EXPECT_TRUE(updated.commercial_pension->redeem_at.has_value());
+  EXPECT_EQ(assets.get_bundle(created.asset.id).commercial_pension->redeem_at,
+            updated.commercial_pension->redeem_at);
+  EXPECT_THROW(transactions.transfer(household_.id, created.asset.id, target.id,
+      100, business_noon_utc(), std::nullopt), ApiError);
+  detail.reservation_window_start = std::nullopt;
+  detail.reservation_window_end = std::nullopt;
+  detail.redeem_at_maturity = false;
+  const auto renewed = assets.update_detail(created.asset.id, AssetType::CommercialPension,
+      nullptr, nullptr, nullptr, nullptr, &detail, nullptr);
+  EXPECT_FALSE(renewed.commercial_pension->redeem_at_maturity);
+  input.commercial_pension = detail;
+  input.commercial_pension->redeem_at_maturity = true;
+  EXPECT_TRUE(assets.create(household_.id, input).commercial_pension->redeem_at_maturity);
+}
+
 // 验证收入使余额增加、支出使余额减少，且流水记录的前后余额与资产最终余额一致。
 TEST_F(ServiceFixture, IncomeAndExpenseUpdateBalance) {
   const Asset cash = make_asset("活期", AssetType::Cash, 2000000);
@@ -98,10 +173,10 @@ TEST_F(ServiceFixture, IncomeAndExpenseUpdateBalance) {
 // 且转出/转入资产余额分别减少和增加。
 TEST_F(ServiceFixture, TransferMovesFundsAndLinksGroup) {
   const Asset cash = make_asset("活期", AssetType::Cash, 1000000);
-  const Asset fund = make_asset("某基金", AssetType::Fund, 500000);
+  const Asset stock_fund = make_asset("某股票基金", AssetType::StockFund, 500000);
   TransactionService transactions(database_);
 
-  const auto result = transactions.transfer(household_.id, cash.id, fund.id, 300000, "", std::nullopt);
+  const auto result = transactions.transfer(household_.id, cash.id, stock_fund.id, 300000, "", std::nullopt);
   EXPECT_EQ(result.outgoing.type, TransactionType::TransferOut);
   EXPECT_EQ(result.incoming.type, TransactionType::TransferIn);
   ASSERT_TRUE(result.outgoing.transfer_group_id.has_value());
@@ -110,7 +185,7 @@ TEST_F(ServiceFixture, TransferMovesFundsAndLinksGroup) {
 
   AssetService assets(database_);
   EXPECT_EQ(assets.get(cash.id).current_balance, 700000);
-  EXPECT_EQ(assets.get(fund.id).current_balance, 800000);
+  EXPECT_EQ(assets.get(stock_fund.id).current_balance, 800000);
 
   TransactionQuery query;
   query.household_id = household_.id;
@@ -210,14 +285,14 @@ TEST_F(ServiceFixture, TransferToSameAssetRejected) {
 
 // 验证调整金额可正可负：正数入账、负数扣减，累计后反映到当前余额。
 TEST_F(ServiceFixture, AdjustmentAppliesSignedAmount) {
-  const Asset fund = make_asset("某基金", AssetType::Fund, 5000000);
+  const Asset stock_fund = make_asset("某股票基金", AssetType::StockFund, 5000000);
   TransactionService transactions(database_);
 
-  transactions.record_adjustment(household_.id, fund.id, 100000, "", std::nullopt);
-  transactions.record_adjustment(household_.id, fund.id, -250000, "", std::nullopt);
+  transactions.record_adjustment(household_.id, stock_fund.id, 100000, "", std::nullopt);
+  transactions.record_adjustment(household_.id, stock_fund.id, -250000, "", std::nullopt);
 
   AssetService assets(database_);
-  EXPECT_EQ(assets.get(fund.id).current_balance, 4850000);
+  EXPECT_EQ(assets.get(stock_fund.id).current_balance, 4850000);
 }
 
 // 验证已关闭（Closed）的资产禁止新增交易。
@@ -336,7 +411,7 @@ TEST_F(ServiceFixture, OpeningBalanceChangeWithoutTransactionsAdjustsBalance) {
   EXPECT_EQ(updated.current_balance, 1500000);
 }
 
-// 验证明细类型必须与资产类型一致：现金资产携带基金明细应被拒绝。
+// 验证明细类型必须与资产类型一致：现金资产携带股票基金明细应被拒绝。
 TEST_F(ServiceFixture, DetailTypeMustMatchAssetType) {
   AssetService assets(database_);
   AssetCreateInput input;
@@ -344,9 +419,9 @@ TEST_F(ServiceFixture, DetailTypeMustMatchAssetType) {
   input.name = "活期";
   input.asset_type = AssetType::Cash;
   input.opening_balance = 0;
-  FundDetail fund;
-  fund.fund_code = "000001";
-  input.fund = fund;
+  StockFundDetail stock_fund;
+  stock_fund.fund_code = "000001";
+  input.stock_fund = stock_fund;
   EXPECT_THROW(assets.create(household_.id, input), ApiError);
 }
 
@@ -404,15 +479,15 @@ TEST_F(ServiceFixture, DeleteTransactionRollsBackBalance) {
 // 验证删除转账流水会成对删除两条，并回滚两端资产余额。
 TEST_F(ServiceFixture, DeleteTransferRemovesPairAndRestoresBalances) {
   const Asset cash = make_asset("活期", AssetType::Cash, 1000000);
-  const Asset fund = make_asset("某基金", AssetType::Fund, 500000);
+  const Asset stock_fund = make_asset("某股票基金", AssetType::StockFund, 500000);
   TransactionService transactions(database_);
   const auto result =
-      transactions.transfer(household_.id, cash.id, fund.id, 300000, "", std::nullopt);
+      transactions.transfer(household_.id, cash.id, stock_fund.id, 300000, "", std::nullopt);
   EXPECT_EQ(transactions.remove(result.outgoing.id), 2);
 
   AssetService assets(database_);
   EXPECT_EQ(assets.get(cash.id).current_balance, 1000000);
-  EXPECT_EQ(assets.get(fund.id).current_balance, 500000);
+  EXPECT_EQ(assets.get(stock_fund.id).current_balance, 500000);
 
   TransactionQuery query;
   query.household_id = household_.id;
@@ -787,7 +862,7 @@ TEST_F(ServiceFixture, TermDepositCreateMaintainsAutoRollover) {
 // 维护预览：列出将要推进的资产变更，且不修改任何数据。
 TEST_F(ServiceFixture, MaintenancePreviewListsChangesWithoutPersisting) {
   const std::string today = time_util::business_today();
-  const AssetBundle fund = make_bond_fund(database_, household_.id, account_.id,
+  const AssetBundle bond_fund = make_bond_fund(database_, household_.id, account_.id,
                                           time_util::add_days(today, -200),
                                           HoldingMode::Rolling, 90);
 
@@ -795,14 +870,14 @@ TEST_F(ServiceFixture, MaintenancePreviewListsChangesWithoutPersisting) {
   const auto plan = maintenance.preview();
   EXPECT_TRUE(plan.required);
   ASSERT_EQ(plan.changes.size(), 1u);
-  EXPECT_EQ(plan.changes[0].asset_id, fund.asset.id);
+  EXPECT_EQ(plan.changes[0].asset_id, bond_fund.asset.id);
   EXPECT_EQ(plan.changes[0].asset_type, "BOND_FUND");
   EXPECT_EQ(plan.changes[0].field, "next_redeem_date");
   EXPECT_GE(plan.changes[0].after, today);
 
   // 预览不落库：数据库中仍是原值。
   AssetService assets(database_);
-  const auto unchanged = assets.get_bundle(fund.asset.id);
+  const auto unchanged = assets.get_bundle(bond_fund.asset.id);
   EXPECT_LT(*unchanged.bond_fund->next_redeem_date, today);
 }
 

@@ -1,4 +1,4 @@
-<!-- 资产管理页：按成员/账户筛选资产，弹窗根据资产类型动态渲染对应明细块（定期/基金/债券/保险）。 -->
+<!-- 资产管理页：按成员/账户筛选资产，弹窗根据资产类型动态渲染对应明细块（定期/股票基金/债券/保险）。 -->
 <template>
   <div>
     <div class="toolbar">
@@ -15,44 +15,57 @@
 
     <el-card shadow="never">
       <el-table :data="assets" v-loading="loading">
-        <el-table-column prop="name" label="资产" />
-        <el-table-column label="类型" width="110">
+        <el-table-column prop="name" label="资产" min-width="110">
+          <template #default="{ row }"><div class="asset-name">{{ row.name }}</div></template>
+        </el-table-column>
+        <el-table-column label="类型" width="90">
           <template #default="{ row }">{{ assetTypeLabels[row.asset_type as AssetType] }}</template>
         </el-table-column>
-        <el-table-column label="属主" width="110">
+        <el-table-column label="属主" width="70">
           <template #default="{ row }">{{ store.memberName(row.owner_member_id) }}</template>
         </el-table-column>
-        <el-table-column label="账户" width="150">
+        <el-table-column label="账户" width="100" show-overflow-tooltip>
           <template #default="{ row }">{{ store.accountName(row.account_id) }}</template>
         </el-table-column>
-        <el-table-column label="当前价值" width="150" align="right">
+        <el-table-column label="当前价值" width="115" align="right">
           <template #default="{ row }"><AmountText :value="row.current_balance" /></template>
         </el-table-column>
-        <el-table-column label="期限状态" width="210">
+        <el-table-column label="期限状态" min-width="210">
           <template #default="{ row }">
             <span v-if="row.asset_type === 'BOND_FUND'">{{ bondFundInfo(row) }}</span>
+            <span v-else-if="row.asset_type === 'FLEXIBLE_TERM'">{{ flexibleTermInfo(row) }}</span>
+            <div v-else-if="row.asset_type === 'COMMERCIAL_PENSION'" class="reservation-range">
+              <div>
+                预约赎回时间：{{ row.commercial_pension?.reservation_window_start && row.commercial_pension?.reservation_window_end
+                  ? `${row.commercial_pension.reservation_window_start} - ${row.commercial_pension.reservation_window_end}`
+                  : '未设置' }}
+              </div>
+              <div>持有期满时间：{{ row.commercial_pension?.maturity_time ?? '未设置' }}</div>
+            </div>
             <span v-else-if="row.asset_type === 'TERM_DEPOSIT'">{{ termDepositInfo(row) }}</span>
             <span v-else>—</span>
           </template>
         </el-table-column>
-        <el-table-column label="状态" width="90">
+        <el-table-column label="状态" width="65">
           <template #default="{ row }">
             <el-tag :type="row.status === 'ACTIVE' ? 'success' : 'info'" size="small">
               {{ assetStatusLabels[row.status as AssetStatus] }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="190" align="right">
+        <el-table-column label="操作" width="140" align="right">
           <template #default="{ row }">
-            <el-button link type="primary" @click="openEdit(row)">编辑</el-button>
-            <el-button
-              link
-              :type="row.status === 'ACTIVE' ? 'warning' : 'success'"
-              @click="toggleStatus(row)"
-            >
-              {{ row.status === 'ACTIVE' ? '关闭' : '启用' }}
-            </el-button>
-            <el-button link type="danger" @click="remove(row)">删除</el-button>
+            <div class="asset-actions">
+              <el-button link type="primary" @click="openEdit(row)">编辑</el-button>
+              <el-button
+                link
+                :type="row.status === 'ACTIVE' ? 'warning' : 'success'"
+                @click="toggleStatus(row)"
+              >
+                {{ row.status === 'ACTIVE' ? '关闭' : '启用' }}
+              </el-button>
+              <el-button link type="danger" @click="remove(row)">删除</el-button>
+            </div>
           </template>
         </el-table-column>
       </el-table>
@@ -127,32 +140,13 @@
           </el-form-item>
         </template>
 
-        <template v-else-if="form.asset_type === 'FUND'">
-          <el-divider content-position="left">基金</el-divider>
+        <template v-else-if="form.asset_type === 'STOCK_FUND'">
+          <el-divider content-position="left">股票基金</el-divider>
           <el-form-item label="基金代码">
             <el-input v-model="detail.fund_code" />
           </el-form-item>
-          <el-form-item label="基金类型">
-            <el-input v-model="detail.fund_type" />
-          </el-form-item>
           <el-form-item label="锁定结束">
             <el-date-picker v-model="detail.lock_end_date" type="date" value-format="YYYY-MM-DD" style="width: 100%" />
-          </el-form-item>
-        </template>
-
-        <template v-else-if="form.asset_type === 'BOND'">
-          <el-divider content-position="left">债券</el-divider>
-          <el-form-item label="债券代码">
-            <el-input v-model="detail.bond_code" />
-          </el-form-item>
-          <el-form-item label="年利率(%)">
-            <el-input v-model="detail.annual_coupon_rate_percent" />
-          </el-form-item>
-          <el-form-item label="购买日期">
-            <el-date-picker v-model="detail.purchase_date" type="date" value-format="YYYY-MM-DD" style="width: 100%" />
-          </el-form-item>
-          <el-form-item label="到期日期">
-            <el-date-picker v-model="detail.maturity_date" type="date" value-format="YYYY-MM-DD" style="width: 100%" />
           </el-form-item>
         </template>
 
@@ -203,6 +197,55 @@
           </el-form-item>
         </template>
 
+        <template v-else-if="form.asset_type === 'FLEXIBLE_TERM'">
+          <el-divider content-position="left">定活理财</el-divider>
+          <el-form-item label="申购确认日" required>
+            <el-date-picker v-model="detail.ft_purchase_date" type="date" value-format="YYYY-MM-DD" style="width: 100%" />
+          </el-form-item>
+          <el-form-item label="持有期" required>
+            <el-radio-group v-model="detail.ft_holding_period_days">
+              <el-radio-button :value="180">180 天</el-radio-button>
+              <el-radio-button :value="360">360 天</el-radio-button>
+            </el-radio-group>
+          </el-form-item>
+          <el-form-item label="转出规则">
+            <span>满 30 个自然日后每月 5 日可转出；持有期满后随时可转出</span>
+          </el-form-item>
+        </template>
+
+        <template v-else-if="form.asset_type === 'COMMERCIAL_PENSION'">
+          <el-divider content-position="left">商业养老金</el-divider>
+          <el-form-item label="买入时间" required>
+            <el-date-picker v-model="detail.cp_purchase_time" type="datetime" value-format="YYYY-MM-DD HH:mm:ss" style="width: 100%" />
+          </el-form-item>
+          <el-form-item label="持有周期" required>
+            <el-input-number v-model="detail.cp_holding_period_value" :min="1" :max="10000" style="width: 160px" />
+            <el-select v-model="detail.cp_holding_period_unit" style="width: 110px; margin-left: 8px">
+              <el-option v-for="(label, value) in termUnitLabels" :key="value" :label="label" :value="value" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="预约赎回范围">
+            <el-date-picker
+              v-model="detail.cp_reservation_window"
+              type="datetimerange"
+              value-format="YYYY-MM-DD HH:mm:ss"
+              range-separator="至"
+              start-placeholder="开始时间"
+              end-placeholder="结束时间"
+              style="width: 100%"
+            />
+          </el-form-item>
+          <el-form-item label="到期赎回">
+            <el-switch v-model="detail.cp_redeem_at_maturity" />
+            <span style="color: #909399; margin-left: 12px">
+              {{ detail.cp_redeem_at_maturity ? '本期到期后赎回' : '默认到期续期' }}
+            </span>
+          </el-form-item>
+          <el-form-item label=" ">
+            <span style="color: #909399">预约范围仅用于提醒，随时可以修改到期处理方式。</span>
+          </el-form-item>
+        </template>
+
         <template v-else-if="form.asset_type === 'INSURANCE'">
           <el-divider content-position="left">保险</el-divider>
           <el-form-item label="保单号">
@@ -243,6 +286,7 @@ import AmountText from '@/components/AmountText.vue'
 import {
   createAsset,
   deleteAsset,
+  getAsset,
   getMaintenancePreview,
   listAssets,
   previewCreateMaintenance,
@@ -292,11 +336,7 @@ const detail = reactive({
   term_unit: 'YEAR' as TermUnit,
   auto_rollover: false,
   fund_code: '',
-  fund_type: '',
   lock_end_date: '' as string | null,
-  bond_code: '',
-  annual_coupon_rate_percent: '',
-  purchase_date: '' as string | null,
   bf_fund_code: '',
   bf_expected_annual_yield_percent: '',
   bf_purchase_date: '' as string | null,
@@ -305,6 +345,13 @@ const detail = reactive({
   bf_first_redeem_date: '' as string | null,
   bf_next_redeem_date: '' as string | null,
   bf_maturity_date: '' as string | null,
+  ft_purchase_date: '' as string | null,
+  ft_holding_period_days: 180 as 180 | 360,
+  cp_purchase_time: '' as string | null,
+  cp_holding_period_value: 1,
+  cp_holding_period_unit: 'YEAR' as TermUnit,
+  cp_reservation_window: [] as string[],
+  cp_redeem_at_maturity: false,
   policy_no: '',
   insurance_company: '',
   product_name: '',
@@ -323,11 +370,7 @@ function resetDetail() {
     term_unit: 'YEAR',
     auto_rollover: false,
     fund_code: '',
-    fund_type: '',
     lock_end_date: null,
-    bond_code: '',
-    annual_coupon_rate_percent: '',
-    purchase_date: null,
     bf_fund_code: '',
     bf_expected_annual_yield_percent: '',
     bf_purchase_date: null,
@@ -336,6 +379,13 @@ function resetDetail() {
     bf_first_redeem_date: null,
     bf_next_redeem_date: null,
     bf_maturity_date: null,
+    ft_purchase_date: null,
+    ft_holding_period_days: 180,
+    cp_purchase_time: null,
+    cp_holding_period_value: 1,
+    cp_holding_period_unit: 'YEAR',
+    cp_reservation_window: [],
+    cp_redeem_at_maturity: false,
     policy_no: '',
     insurance_company: '',
     product_name: '',
@@ -435,10 +485,21 @@ function bondFundInfo(asset: Asset): string {
   const date =
     bondFund.holding_mode === 'ROLLING' ? bondFund.next_redeem_date : bondFund.first_redeem_date
   const days = bondFund.days_until_redeem
+  if (bondFund.holding_mode === 'ROLLING' && bondFund.status === 'LOCKED' && days !== null && days > 0) {
+    return `距离赎回日还有 ${days} 天，可预约赎回`
+  }
   if (bondFund.status === 'LOCKED' && days !== null && days > 0) {
     return `${label} · 还有 ${days} 天`
   }
   return date ? `${label}（${date}）` : label
+}
+
+function flexibleTermInfo(asset: Asset): string {
+  const detail = asset.flexible_term
+  if (!detail) return '—'
+  return detail.can_transfer
+    ? `今日可转出（持有期满日 ${detail.maturity_date}）`
+    : `下次可转出 ${detail.next_transfer_date}（持有期满日 ${detail.maturity_date}）`
 }
 
 // 按筛选条件拉取资产列表，并同步 store 中的资产缓存（供交易页下拉使用）。
@@ -474,7 +535,15 @@ function openCreate() {
 }
 
 // 打开「编辑」弹窗：基本信息回填，并把「分」金额、「定点利率」分别转成「元」「百分数」展示。
-function openEdit(asset: Asset) {
+async function openEdit(asset: Asset) {
+  if (asset.asset_type === 'COMMERCIAL_PENSION') {
+    try {
+      asset = await getAsset(asset.id)
+    } catch (error) {
+      ElMessage.error((error as Error).message)
+      return
+    }
+  }
   editing.value = asset
   row.value = asset
   form.account_id = asset.account_id
@@ -492,16 +561,9 @@ function openEdit(asset: Asset) {
     detail.term_unit = asset.term_deposit.term_unit ?? 'YEAR'
     detail.auto_rollover = asset.term_deposit.auto_rollover
   }
-  if (asset.fund) {
-    detail.fund_code = asset.fund.fund_code ?? ''
-    detail.fund_type = asset.fund.fund_type ?? ''
-    detail.lock_end_date = asset.fund.lock_end_date
-  }
-  if (asset.bond) {
-    detail.bond_code = asset.bond.bond_code ?? ''
-    detail.annual_coupon_rate_percent = scaledToPercent(asset.bond.annual_coupon_rate)
-    detail.purchase_date = asset.bond.purchase_date
-    detail.maturity_date = asset.bond.maturity_date
+  if (asset.stock_fund) {
+    detail.fund_code = asset.stock_fund.fund_code ?? ''
+    detail.lock_end_date = asset.stock_fund.lock_end_date
   }
   if (asset.bond_fund) {
     detail.bf_fund_code = asset.bond_fund.fund_code ?? ''
@@ -515,6 +577,19 @@ function openEdit(asset: Asset) {
     detail.bf_first_redeem_date = asset.bond_fund.first_redeem_date
     detail.bf_next_redeem_date = asset.bond_fund.next_redeem_date
     detail.bf_maturity_date = asset.bond_fund.maturity_date
+  }
+  if (asset.flexible_term) {
+    detail.ft_purchase_date = asset.flexible_term.purchase_date
+    detail.ft_holding_period_days = asset.flexible_term.holding_period_days
+  }
+  if (asset.commercial_pension) {
+    detail.cp_purchase_time = asset.commercial_pension.purchase_time
+    detail.cp_holding_period_value = asset.commercial_pension.holding_period_value
+    detail.cp_holding_period_unit = asset.commercial_pension.holding_period_unit
+    detail.cp_reservation_window = asset.commercial_pension.reservation_window_start && asset.commercial_pension.reservation_window_end
+      ? [asset.commercial_pension.reservation_window_start, asset.commercial_pension.reservation_window_end]
+      : []
+    detail.cp_redeem_at_maturity = asset.commercial_pension.redeem_at_maturity
   }
   if (asset.insurance) {
     detail.policy_no = asset.insurance.policy_no ?? ''
@@ -539,19 +614,10 @@ function buildDetail(type: AssetType): Record<string, unknown> | null {
       auto_rollover: detail.auto_rollover,
     }
   }
-  if (type === 'FUND') {
+  if (type === 'STOCK_FUND') {
     return {
       fund_code: detail.fund_code || null,
-      fund_type: detail.fund_type || null,
       lock_end_date: detail.lock_end_date || null,
-    }
-  }
-  if (type === 'BOND') {
-    return {
-      bond_code: detail.bond_code || null,
-      annual_coupon_rate: percentToScaled(detail.annual_coupon_rate_percent || '0'),
-      purchase_date: detail.purchase_date || null,
-      maturity_date: detail.maturity_date || null,
     }
   }
   if (type === 'BOND_FUND') {
@@ -579,15 +645,32 @@ function buildDetail(type: AssetType): Record<string, unknown> | null {
       insured_amount: toMinor(detail.insured_amount_yuan),
     }
   }
+  if (type === 'FLEXIBLE_TERM') {
+    return {
+      purchase_date: detail.ft_purchase_date,
+      holding_period_days: detail.ft_holding_period_days,
+    }
+  }
+  if (type === 'COMMERCIAL_PENSION') {
+    return {
+      purchase_time: detail.cp_purchase_time,
+      holding_period_value: detail.cp_holding_period_value,
+      holding_period_unit: detail.cp_holding_period_unit,
+      reservation_window_start: detail.cp_reservation_window[0] ?? null,
+      reservation_window_end: detail.cp_reservation_window[1] ?? null,
+      redeem_at_maturity: detail.cp_redeem_at_maturity,
+    }
+  }
   return null
 }
 
 // 资产类型 -> 后端明细块字段名 的映射，用于提交时组装 detail_type 与对应明细键。
 const detailKey: Partial<Record<AssetType, string>> = {
   TERM_DEPOSIT: 'term_deposit',
-  FUND: 'fund',
-  BOND: 'bond',
+  STOCK_FUND: 'stock_fund',
   BOND_FUND: 'bond_fund',
+  FLEXIBLE_TERM: 'flexible_term',
+  COMMERCIAL_PENSION: 'commercial_pension',
   INSURANCE: 'insurance',
 }
 
@@ -603,6 +686,14 @@ async function save() {
   }
   if (form.asset_type === 'TERM_DEPOSIT' && (!detail.start_date || !detail.term_value)) {
     ElMessage.warning('请填写定期存款的起息日与存期')
+    return
+  }
+  if (form.asset_type === 'FLEXIBLE_TERM' && !detail.ft_purchase_date) {
+    ElMessage.warning('请选择申购确认日')
+    return
+  }
+  if (form.asset_type === 'COMMERCIAL_PENSION' && !detail.cp_purchase_time) {
+    ElMessage.warning('请选择买入时间')
     return
   }
   saving.value = true
@@ -777,3 +868,27 @@ async function remove(asset: Asset) {
   }
 }
 </script>
+
+<style scoped>
+.asset-name {
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.reservation-range {
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.asset-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.asset-actions :deep(.el-button + .el-button) {
+  margin-left: 0;
+}
+</style>

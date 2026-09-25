@@ -1,5 +1,5 @@
 // 资产（asset）及其明细表数据访问：封装 asset 与
-// term_deposit/fund/bond/insurance_detail 的 SQL 执行与行映射。
+// term_deposit/stock_fund/bond/insurance_detail 的 SQL 执行与行映射。
 #pragma once
 
 #include <cstdint>
@@ -55,15 +55,15 @@ class AssetRepository {
   bool update_term_deposit_period(std::int64_t asset_id, const std::string& start_date,
                                   const std::string& maturity_date);
 
-  void upsert_fund_detail(const FundDetail& detail);
-  std::optional<FundDetail> find_fund_detail(std::int64_t asset_id);
-  void delete_fund_detail(std::int64_t asset_id);
-
-  void upsert_bond_detail(const BondDetail& detail);
-  std::optional<BondDetail> find_bond_detail(std::int64_t asset_id);
-  void delete_bond_detail(std::int64_t asset_id);
+  void upsert_stock_fund_detail(const StockFundDetail& detail);
+  std::optional<StockFundDetail> find_stock_fund_detail(std::int64_t asset_id);
+  void delete_stock_fund_detail(std::int64_t asset_id);
 
   void upsert_bond_fund_detail(const BondFundDetail& detail);
+  void upsert_flexible_term_detail(const FlexibleTermDetail& detail);
+  std::optional<FlexibleTermDetail> find_flexible_term_detail(std::int64_t asset_id);
+  void upsert_commercial_pension_detail(const CommercialPensionDetail& detail);
+  std::optional<CommercialPensionDetail> find_commercial_pension_detail(std::int64_t asset_id);
   std::optional<BondFundDetail> find_bond_fund_detail(std::int64_t asset_id);
   void delete_bond_fund_detail(std::int64_t asset_id);
   // 每日维护：列出所有滚动持有（ROLLING）债基，供推进 next_redeem_date。

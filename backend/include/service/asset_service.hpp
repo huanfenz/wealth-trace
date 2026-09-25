@@ -1,4 +1,4 @@
-// 资产服务：资产（Asset）及其明细（定期/基金/债券/保险）的创建与维护。
+// 资产服务：资产（Asset）及其明细（定期/股票基金/债券基金/保险）的创建与维护。
 #pragma once
 
 #include <cstdint>
@@ -16,7 +16,7 @@ namespace wt {
 class Database;
 
 // 创建资产的入参。金额单位为「分」；opening_balance 对普通资产须 >= 0，
-// 对负债须 <= 0。四个明细块最多只能提供其一，且类型须与 asset_type 一致。
+// 对负债须 <= 0。各类型明细块最多只能提供其一，且类型须与 asset_type 一致。
 struct AssetCreateInput {
   std::int64_t account_id = 0;
   std::string name;
@@ -24,9 +24,10 @@ struct AssetCreateInput {
   std::int64_t opening_balance = 0;
   std::optional<std::string> remark;
   std::optional<TermDepositDetail> term_deposit;
-  std::optional<FundDetail> fund;
-  std::optional<BondDetail> bond;
+  std::optional<StockFundDetail> stock_fund;
   std::optional<BondFundDetail> bond_fund;
+  std::optional<FlexibleTermDetail> flexible_term;
+  std::optional<CommercialPensionDetail> commercial_pension;
   std::optional<InsuranceDetail> insurance;
   // 添加时维护：为 true 时，创建成功后立即按与每日维护相同的规则推进过期日期
   // （滚动债基 next_redeem_date / 自动续存定存本期起止日期）。默认 false 保持原样。
@@ -51,9 +52,10 @@ struct CreateMaintenancePreview {
 struct AssetBundle {
   Asset asset;
   std::optional<TermDepositDetail> term_deposit;
-  std::optional<FundDetail> fund;
-  std::optional<BondDetail> bond;
+  std::optional<StockFundDetail> stock_fund;
   std::optional<BondFundDetail> bond_fund;
+  std::optional<FlexibleTermDetail> flexible_term;
+  std::optional<CommercialPensionDetail> commercial_pension;
   std::optional<InsuranceDetail> insurance;
 };
 
@@ -101,8 +103,9 @@ class AssetService {
   // invalid_request），对应明细指针必须非空，其余类型会报「无明细块」。
   AssetBundle update_detail(std::int64_t id, AssetType detail_type,
                             const TermDepositDetail* term_deposit,
-                            const FundDetail* fund, const BondDetail* bond,
-                            const BondFundDetail* bond_fund,
+                            const StockFundDetail* stock_fund, const BondFundDetail* bond_fund,
+                            const FlexibleTermDetail* flexible_term,
+                            const CommercialPensionDetail* commercial_pension,
                             const InsuranceDetail* insurance);
 
   // 删除资产：资产不存在抛 not_found。资产下的全部流水与明细块会被级联删除，

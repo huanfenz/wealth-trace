@@ -51,7 +51,7 @@
     "member_roles": ["OWNER", "MEMBER"],
     "member_statuses": ["ACTIVE", "INACTIVE"],
     "account_types": ["BANK", "ALIPAY", "WECHAT", "CASH", "SECURITIES", "INSURANCE", "OTHER"],
-    "asset_types": ["CASH", "TERM_DEPOSIT", "FUND", "BOND", "BOND_FUND", "INSURANCE", "LIABILITY", "OTHER"],
+    "asset_types": ["CASH", "TERM_DEPOSIT", "STOCK_FUND", "BOND_FUND", "FLEXIBLE_TERM", "COMMERCIAL_PENSION", "INSURANCE", "LIABILITY", "OTHER"],
     "asset_statuses": ["ACTIVE", "CLOSED"],
     "transaction_types": ["INCOME", "EXPENSE", "TRANSFER_IN", "TRANSFER_OUT", "ADJUSTMENT"],
     "term_units": ["DAY", "MONTH", "YEAR"],
@@ -162,7 +162,7 @@
 
 ### `GET /api/households/{id}/assets?owner_member_id=&account_id=`
 
-返回资产数组，按 `asset_type` 附带对应明细块（`term_deposit` / `fund` / `bond` / `bond_fund` / `insurance`），
+返回资产数组，按 `asset_type` 附带对应明细块（`term_deposit` / `stock_fund` / `bond_fund` / `insurance`），
 不适用时为 `null`：
 
 ```json
@@ -178,8 +178,7 @@
   "status": "ACTIVE",
   "remark": null,
   "term_deposit": null,
-  "fund": null,
-  "bond": null,
+  "stock_fund": null,
   "bond_fund": null,
   "insurance": null,
   "created_at": "2026-09-19 10:00:00",
@@ -226,17 +225,17 @@
 （`ACTIVE` 存续中 / `MATURED` 已到期 / `UNKNOWN`）与 `days_until_maturity`（距到期天数，可空）。
 `auto_rollover=true` 时，每日维护在到期当天（业务日期 `today >= maturity_date`）自动推进到下一存期，
 同步更新 `start_date` 为当前存期起始日；不修改本金（即 `opening_balance`）、当前金额与利率。
-明细不再保存 `principal`，本金以资产的 `opening_balance` 为准（债券同理，名称以 `asset.name` 为准）。
+明细不再保存 `principal`，本金以资产的 `opening_balance` 为准；产品名称以 `asset.name` 为准。
 
-基金：
+股票基金：
 
 ```json
 {
   "account_id": 1,
-  "name": "某债券基金",
-  "asset_type": "FUND",
+  "name": "某股票基金",
+  "asset_type": "STOCK_FUND",
   "opening_balance": 5000000,
-  "fund": { "fund_code": "000001", "fund_type": "BOND", "lock_end_date": "2027-03-01" }
+  "stock_fund": { "fund_code": "000001", "lock_end_date": "2027-03-01" }
 }
 ```
 
@@ -277,6 +276,51 @@
 > 前端可先调用下面的 `POST .../assets/maintenance-preview` 预览将要产生的推进，并向用户确认。
 
 债券 / 保险同理，使用 `bond` / `insurance` 块。
+
+定活理财（`asset_type=FLEXIBLE_TERM`）必须提供 `flexible_term` 明细。`holding_period_days`
+仅支持 `180` 或 `360`，日期按申购确认日后的自然日计算：
+
+```json
+{
+  "account_id": 1,
+  "name": "180天定活理财",
+  "asset_type": "FLEXIBLE_TERM",
+  "opening_balance": 1000000,
+  "flexible_term": { "purchase_date": "2026-09-23", "holding_period_days": 180 }
+}
+```
+
+申购确认日满 30 个自然日后，每月 5 日可转出；持有期满当日起每天可转出。
+返回明细含只读 `maturity_date`、`next_transfer_date`、`can_transfer`。
+转账接口按服务端当前业务日期校验定活理财转出，非开放日返回冲突错误。
+
+商业养老金（`asset_type=COMMERCIAL_PENSION`）必须提供 `commercial_pension` 明细。
+买入时间与预约赎回提醒范围采用业务时区的 `YYYY-MM-DD HH:MM:SS`；持有周期由正整数
+`holding_period_value` 和 `holding_period_unit`（`DAY` / `MONTH` / `YEAR`）组成。
+
+```json
+{
+  "account_id": 1,
+  "name": "商业养老金",
+  "asset_type": "COMMERCIAL_PENSION",
+  "opening_balance": 1000000,
+  "commercial_pension": {
+    "purchase_time": "2026-09-23 10:00:00",
+    "holding_period_value": 1,
+    "holding_period_unit": "YEAR",
+    "reservation_window_start": "2027-08-01 00:00:00",
+    "reservation_window_end": "2027-08-31 23:59:59"
+  }
+}
+```
+
+新建时默认到期续期。预约范围只用于提醒：开始前为 `UPCOMING`，范围内为 `OPEN`，
+结束后为 `ENDED`；未设置为 `NOT_SET`。它不限制用户修改到期处理方式。
+创建时或之后用 `PUT /api/assets/{id}/detail` 将 `redeem_at_maturity` 设为 `true`，
+系统锁定下一次到期时间；到期后显示 `MATURED`，并允许从该资产转账。
+未选择到期赎回时，按原到期时间连续续期，下一到期时间实时计算。
+返回明细还包含只读 `maturity_time`、`reservation_status`、`status`。到期赎回不会自动生成流水，
+实际转出需用户发起转账。
 
 负债（`opening_balance` 必须 ≤ 0）：
 
@@ -327,8 +371,8 @@
 
 ```json
 {
-  "detail_type": "FUND",
-  "fund": { "fund_code": "000001", "fund_type": "BOND" }
+  "detail_type": "STOCK_FUND",
+  "stock_fund": { "fund_code": "000001" }
 }
 ```
 
@@ -379,7 +423,7 @@
 `amount` 可正可负：
 
 ```json
-{ "asset_id": 3, "amount": 100000, "remark": "基金估值调整" }
+{ "asset_id": 3, "amount": 100000, "remark": "股票基金估值调整" }
 ```
 
 ### `POST /api/households/{id}/transfers`
