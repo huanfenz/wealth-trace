@@ -35,28 +35,27 @@
         <el-table-column label="成员" width="110">
           <template #default="{ row }">{{ store.memberName(row.owner_member_id) }}</template>
         </el-table-column>
-        <el-table-column label="资产" width="160">
-          <template #default="{ row }">{{ store.assetName(row.asset_id) }}</template>
-        </el-table-column>
-        <el-table-column label="类型" width="110">
+        <el-table-column label="交易" min-width="220">
           <template #default="{ row }">
-            <el-tag size="small" :type="row.transfer_group_id !== null ? 'primary' : tagType(row.type)">
+            <strong>{{ row.title }}</strong>
+            <div class="muted">{{ row.subtitle }}</div>
+          </template>
+        </el-table-column>
+        <el-table-column label="类型" width="54" align="center">
+          <template #default="{ row }">
+            <el-tag size="small" :type="tagType(row.type)">
               {{ typeLabel(row) }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="category" label="分类" width="110" />
-        <el-table-column label="金额" width="150" align="right">
+        <el-table-column label="金额" width="150" align="center">
           <template #default="{ row }">
-            <AmountText :value="signedAmount(row)" />
+            <span class="amount" :class="row.direction === 'OUT' ? 'negative' : row.direction === 'IN' ? 'positive' : ''">
+              {{ amountText(row) }}
+            </span>
           </template>
         </el-table-column>
-        <el-table-column label="余额" width="150" align="right">
-          <template #default="{ row }">
-            <span v-if="row.balance_after !== null" class="amount">{{ formatMoney(row.balance_after) }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column prop="remark" label="备注" show-overflow-tooltip />
+        <el-table-column prop="remark" label="备注" min-width="240" show-overflow-tooltip />
         <el-table-column label="操作" width="110" align="right">
           <template #default="{ row }">
             <el-button v-if="row.type === 'INCOME' || row.type === 'EXPENSE'" link type="primary" @click="openCategoryEditor(row)">编辑</el-button>
@@ -152,7 +151,7 @@
       :show-close="!deleting"
     >
       <p>将删除{{ deleteTargets.length === 1 ? '这条' : `选中的 ${deleteTargets.length} 条` }}交易记录。</p>
-      <p v-if="deleteHasTransfer">选中记录包含转账，配对的转出和转入记录会一起删除。</p>
+      <p v-if="deleteHasTransfer">选中记录包含转账；每笔转账作为一个整体删除。</p>
       <el-radio-group v-model="deleteMode" class="delete-options">
         <el-radio value="records">仅删除交易记录（资产余额保持不变）</el-radio>
         <el-radio value="rollback">删除交易记录并回滚资产余额</el-radio>
@@ -167,14 +166,14 @@
 </template>
 
 <script setup lang="ts">
-// 职责：展示/新增交易流水；同一弹窗按 kind 复用为收入、支出、转账、调整四种表单并分派到对应接口。
+// 职责：展示和新增完整业务交易；收入、支出、转账与调整使用对应业务接口。
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Edit, Minus, Plus, Sort } from '@element-plus/icons-vue'
 
-import AmountText from '@/components/AmountText.vue'
 import {
   deleteTransaction,
+  listAssetTransactions,
   listTransactions,
   recordAdjustment,
   recordExpense,
@@ -208,7 +207,7 @@ const deleteDialogVisible = ref(false)
 const deleteTargets = ref<Transaction[]>([])
 const deleteMode = ref<DeleteMode | null>(null)
 const deleting = ref(false)
-const deleteHasTransfer = computed(() => deleteTargets.value.some((item) => item.transfer_group_id !== null))
+const deleteHasTransfer = computed(() => deleteTargets.value.some((item) => item.type === 'TRANSFER'))
 const editDialogVisible = ref(false)
 const editingTransaction = ref<Transaction | null>(null)
 const editCategoryId = ref<number | null>(null)
@@ -261,40 +260,28 @@ function assetLabel(id: number): string {
 }
 
 // 将金额按交易方向转为带符号数值：支出/转出取负，收入/转入/调整保持原值。
-function signedAmount(transaction: Transaction): number {
-  switch (transaction.type) {
-    case 'EXPENSE':
-    case 'TRANSFER_OUT':
-    case 'ASSET_PURCHASE':
-      return -transaction.amount
-    case 'ADJUSTMENT':
-      return transaction.amount
-    default:
-      return transaction.amount
-  }
+function amountText(transaction: Transaction): string {
+  const amount = formatMoney(transaction.amount)
+  if (transaction.direction === 'IN') return `+ ${amount}`
+  if (transaction.direction === 'OUT') return `- ${amount}`
+  return amount
 }
 
 // 交易类型对应的标签配色。
 function tagType(type: TransactionType): 'success' | 'warning' | 'primary' | 'info' {
   switch (type) {
     case 'INCOME':
-    case 'TRANSFER_IN':
+    case 'TRANSFER':
+    case 'INVESTMENT':
       return 'success'
     case 'EXPENSE':
-    case 'TRANSFER_OUT':
-    case 'ASSET_PURCHASE':
       return 'warning'
     case 'ADJUSTMENT':
       return 'info'
   }
 }
 
-// 类型文案：转账流水（有 transfer_group_id）统一标注为「转账」并附方向，
-// 便于在收支列表里一眼识别出这是一次转账而非普通收支。
 function typeLabel(transaction: Transaction): string {
-  if (transaction.transfer_group_id !== null) {
-    return transaction.type === 'TRANSFER_OUT' ? '转账·转出' : '转账·转入'
-  }
   return transactionTypeLabels[transaction.type]
 }
 
@@ -305,13 +292,16 @@ async function load() {
   }
   loading.value = true
   try {
-    const result = await listTransactions(store.householdId, {
+    const query = {
       ownerMemberId: filterMember.value,
       assetId: filterAsset.value,
       type: filterType.value,
       limit: pageSize,
       offset: (page.value - 1) * pageSize,
-    })
+    }
+    const result = filterAsset.value
+      ? await listAssetTransactions(filterAsset.value, store.householdId, query)
+      : await listTransactions(store.householdId, query)
     transactions.value = result.items
     total.value = result.total
   } catch (error) {
@@ -446,13 +436,7 @@ function bulkRemove() {
 
 async function confirmDelete() {
   if (!deleteMode.value || deleting.value) return
-  const seenGroups = new Set<number>()
-  const operations = deleteTargets.value.filter((transaction) => {
-    if (transaction.transfer_group_id === null) return true
-    if (seenGroups.has(transaction.transfer_group_id)) return false
-    seenGroups.add(transaction.transfer_group_id)
-    return true
-  })
+  const operations = deleteTargets.value
   deleting.value = true
   try {
     const results = await Promise.allSettled(

@@ -264,6 +264,19 @@ export function listTransactions(
   })
 }
 
+/** 某资产视角的流水，按对应 Entry 的方向展示。 */
+export function listAssetTransactions(assetId: number, householdId: number, query: TransactionQuery): Promise<Paged<Transaction>> {
+  return get<Paged<Transaction>>(`/assets/${assetId}/transactions`, {
+    household_id: householdId,
+    owner_member_id: query.ownerMemberId,
+    type: query.type,
+    from: query.from,
+    to: query.to,
+    limit: query.limit,
+    offset: query.offset,
+  })
+}
+
 /** 记录一笔收入。 */
 export function recordIncome(
   householdId: number,
@@ -288,12 +301,12 @@ export function recordAdjustment(
   return post<Transaction>(`/households/${householdId}/transactions/adjustment`, body)
 }
 
-/** 在两个资产间转账，后端生成转出/转入两条流水。 */
+/** 在两个资产间转账，后端返回完整业务交易。 */
 export function transfer(
   householdId: number,
   body: Record<string, unknown>,
-): Promise<{ outgoing: Transaction; incoming: Transaction }> {
-  return post<{ outgoing: Transaction; incoming: Transaction }>(`/households/${householdId}/transfers`, body)
+): Promise<Transaction> {
+  return post<Transaction>(`/households/${householdId}/transfers`, body)
 }
 
 /** 删除流水；可选择是否回滚资产余额，转账流水始终成对删除。 */

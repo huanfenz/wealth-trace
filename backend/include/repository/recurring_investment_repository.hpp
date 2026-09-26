@@ -25,7 +25,7 @@ class RecurringInvestmentRepository {
   std::optional<RecurringInvestmentExecution> find_execution(std::int64_t id);
   std::vector<RecurringInvestmentExecution> list_executions(std::int64_t plan_id);
   bool update_execution(const RecurringInvestmentExecution& execution);
-  bool mark_reversed(std::int64_t transfer_group_id, const std::string& updated_at);
+  bool mark_reversed(std::int64_t transaction_id, const std::string& updated_at);
 
  private:
   Database& database_;

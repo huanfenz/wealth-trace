@@ -28,8 +28,7 @@ void MetaController::register_routes(crow::SimpleApp& app) {
                              "BOND_FUND", "FLEXIBLE_TERM", "COMMERCIAL_PENSION",
                              "INSURANCE", "LIABILITY", "OTHER"};
       data["asset_statuses"] = {"ACTIVE", "CLOSED"};
-      data["transaction_types"] = {"INCOME", "EXPENSE", "TRANSFER_IN", "TRANSFER_OUT",
-                                   "ADJUSTMENT", "ASSET_PURCHASE"};
+      data["transaction_types"] = {"INCOME", "EXPENSE", "TRANSFER", "INVESTMENT", "ADJUSTMENT"};
       data["transaction_statuses"] = {"NORMAL", "VOID"};
       data["term_units"] = {"DAY", "MONTH", "YEAR"};
       data["income_categories"] = categories_.income;

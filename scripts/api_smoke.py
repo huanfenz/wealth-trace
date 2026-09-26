@@ -6,11 +6,14 @@ core money flows (income / expense / transfer / statistics). Standard library
 only, so it works in the minimal WSL environment.
 """
 import json
+import os
 import sys
 import urllib.error
 import urllib.request
 
-BASE = "http://127.0.0.1:8080"
+BASE = os.environ.get("WT_SMOKE_BASE_URL")
+if not BASE:
+    raise SystemExit("Run this test through scripts/run_api_smoke.sh")
 
 
 def call(method, path, payload=None):
@@ -71,7 +74,15 @@ def main():
     transfer = call("POST", f"/api/households/{household_id}/transfers",
                     {"from_asset_id": cash["id"], "to_asset_id": stock_fund["id"],
                      "amount": 500000})
-    assert transfer["outgoing"]["transfer_group_id"] == transfer["incoming"]["transfer_group_id"]
+    assert transfer["type"] == "TRANSFER"
+    assert transfer["direction"] == "NEUTRAL"
+    assert len(transfer["entries"]) == 2
+    assert {entry["direction"] for entry in transfer["entries"]} == {"IN", "OUT"}
+    asset_rows = call("GET", f"/api/assets/{cash['id']}/transactions?household_id={household_id}")
+    transfer_row = next(row for row in asset_rows["items"] if row["id"] == transfer["id"])
+    assert transfer_row["direction"] == "OUT", transfer_row
+    detail = call("GET", f"/api/transactions/{transfer['id']}")
+    assert len(detail["entries"]) == 2
 
     cash_after = call("GET", f"/api/assets/{cash['id']}")
     fund_after = call("GET", f"/api/assets/{stock_fund['id']}")
@@ -79,15 +90,15 @@ def main():
     assert fund_after["current_balance"] == 5000000 + 500000
 
     transactions = call("GET", f"/api/households/{household_id}/transactions")
-    assert transactions["total"] == 4, transactions["total"]
+    assert transactions["total"] == 3, transactions["total"]
 
     overview = call("GET", f"/api/households/{household_id}/statistics/overview")
     assert overview["net_worth"] == cash_after["current_balance"] + fund_after["current_balance"]
     assert overview["month_income"] == 1000000
     assert overview["month_expense"] == 3500
 
-    deleted = call("DELETE", f"/api/transactions/{transfer['outgoing']['id']}")
-    assert deleted["deleted"] == 2, deleted
+    deleted = call("DELETE", f"/api/transactions/{transfer['id']}")
+    assert deleted["deleted"] == 1, deleted
     restored_cash = call("GET", f"/api/assets/{cash['id']}")
     restored_fund = call("GET", f"/api/assets/{stock_fund['id']}")
     assert restored_cash["current_balance"] == 2000000 + 1000000 - 3500
@@ -96,8 +107,8 @@ def main():
     kept_transfer = call("POST", f"/api/households/{household_id}/transfers",
                          {"from_asset_id": cash["id"], "to_asset_id": stock_fund["id"],
                           "amount": 100000})
-    deleted = call("DELETE", f"/api/transactions/{kept_transfer['outgoing']['id']}?rollback_assets=false")
-    assert deleted["deleted"] == 2, deleted
+    deleted = call("DELETE", f"/api/transactions/{kept_transfer['id']}?rollback_assets=false")
+    assert deleted["deleted"] == 1, deleted
     kept_cash = call("GET", f"/api/assets/{cash['id']}")
     kept_fund = call("GET", f"/api/assets/{stock_fund['id']}")
     assert kept_cash["current_balance"] == restored_cash["current_balance"] - 100000

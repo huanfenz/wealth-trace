@@ -69,8 +69,7 @@ export const termUnitLabels: Record<TermUnit, string> = {
 export const transactionTypeLabels: Record<TransactionType, string> = {
   INCOME: '收入',
   EXPENSE: '支出',
-  TRANSFER_IN: '转入',
-  TRANSFER_OUT: '转出',
-  ADJUSTMENT: '调整',
-  ASSET_PURCHASE: '资产购入',
+  TRANSFER: '转账',
+  INVESTMENT: '投资',
+  ADJUSTMENT: '资产调整',
 }

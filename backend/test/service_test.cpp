@@ -3,6 +3,7 @@
 #include <atomic>
 #include <barrier>
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <string>
 #include <thread>
@@ -11,8 +12,10 @@
 #include "common/error.hpp"
 #include "database/database.hpp"
 #include "database/migration.hpp"
+#include "database/statement.hpp"
 #include "model/entities.hpp"
 #include "repository/system_state_repository.hpp"
+#include "repository/transaction_repository.hpp"
 #include "service/account_service.hpp"
 #include "service/category_service.hpp"
 #include "service/asset_service.hpp"
@@ -93,6 +96,14 @@ TEST_F(ServiceFixture, FlexibleTermDetailAndTransferWindow) {
   ASSERT_TRUE(assets.get_bundle(created.asset.id).flexible_term.has_value());
   const auto target = make_asset("活期", AssetType::Cash, 0);
   TransactionService transactions(database_);
+  input.flexible_term->purchase_date = today;
+  input.name = "未到赎回日的定活理财";
+  const auto locked = assets.create(household_.id, input);
+  const auto fund = make_asset("投资目标", AssetType::StockFund, 0);
+  EXPECT_THROW(transactions.investment_buy(household_.id, locked.asset.id, fund.id,
+                                          100, business_noon_utc(), std::nullopt), ApiError);
+  EXPECT_EQ(assets.get(locked.asset.id).current_balance, 10000);
+  input.flexible_term->purchase_date = time_util::add_days(today, -31);
   if (flexible_term::can_transfer(*input.flexible_term, today)) {
     EXPECT_NO_THROW(transactions.transfer(household_.id, created.asset.id, target.id,
                                            100, business_noon_utc(), std::nullopt));
@@ -159,12 +170,16 @@ TEST_F(ServiceFixture, IncomeAndExpenseUpdateBalance) {
   TransactionService transactions(database_);
 
   const auto income = transactions.record_income(household_.id, cash.id, "工资", 1000000, "", std::nullopt);
-  EXPECT_EQ(income.balance_before.value(), 2000000);
-  EXPECT_EQ(income.balance_after.value(), 3000000);
+  auto income_entries=TransactionRepository(database_).entries(income.id);
+  ASSERT_EQ(income_entries.size(),1u);
+  EXPECT_EQ(income_entries[0].balance_before.value(),2000000);
+  EXPECT_EQ(income_entries[0].balance_after.value(),3000000);
 
   const auto expense = transactions.record_expense(household_.id, cash.id, "餐饮", 3500, "", std::nullopt);
-  EXPECT_EQ(expense.balance_before.value(), 3000000);
-  EXPECT_EQ(expense.balance_after.value(), 2996500);
+  auto expense_entries=TransactionRepository(database_).entries(expense.id);
+  ASSERT_EQ(expense_entries.size(),1u);
+  EXPECT_EQ(expense_entries[0].balance_before.value(),3000000);
+  EXPECT_EQ(expense_entries[0].balance_after.value(),2996500);
 
   AssetService assets(database_);
   EXPECT_EQ(assets.get(cash.id).current_balance, 2996500);
@@ -210,19 +225,23 @@ TEST_F(ServiceFixture, CategoriesAreManagedAndLinkedToTransactions) {
   EXPECT_THROW(categories.update(household_.id + 999, created.id, "越权改名", 0), ApiError);
 }
 
-// 验证转账产生 TRANSFER_OUT + TRANSFER_IN 两条流水、共用同一 transfer_group_id，
-// 且转出/转入资产余额分别减少和增加。
-TEST_F(ServiceFixture, TransferMovesFundsAndLinksGroup) {
+// 转账以一个业务交易保存，Entry 分别描述转出与转入资产变化。
+TEST_F(ServiceFixture, TransferIsOneTransactionWithTwoEntries) {
   const Asset cash = make_asset("活期", AssetType::Cash, 1000000);
   const Asset stock_fund = make_asset("某股票基金", AssetType::StockFund, 500000);
   TransactionService transactions(database_);
 
   const auto result = transactions.transfer(household_.id, cash.id, stock_fund.id, 300000, "", std::nullopt);
-  EXPECT_EQ(result.outgoing.type, TransactionType::TransferOut);
-  EXPECT_EQ(result.incoming.type, TransactionType::TransferIn);
-  ASSERT_TRUE(result.outgoing.transfer_group_id.has_value());
-  ASSERT_TRUE(result.incoming.transfer_group_id.has_value());
-  EXPECT_EQ(result.outgoing.transfer_group_id, result.incoming.transfer_group_id);
+  EXPECT_EQ(result.type, TransactionType::Transfer);
+  const auto entries=TransactionRepository(database_).entries(result.id);
+  ASSERT_EQ(entries.size(),2u);
+  EXPECT_EQ(entries[0].amount,300000);
+  EXPECT_EQ(entries[1].amount,300000);
+  EXPECT_NE(entries[0].direction,entries[1].direction);
+  const auto dto=transactions.dto(result.id);
+  EXPECT_EQ(dto.direction,DisplayDirection::Neutral);
+  EXPECT_EQ(dto.amount,300000);
+  EXPECT_EQ(dto.subtitle,"活期 → 某股票基金");
 
   AssetService assets(database_);
   EXPECT_EQ(assets.get(cash.id).current_balance, 700000);
@@ -230,7 +249,7 @@ TEST_F(ServiceFixture, TransferMovesFundsAndLinksGroup) {
 
   TransactionQuery query;
   query.household_id = household_.id;
-  EXPECT_EQ(transactions.count(query), 2);
+  EXPECT_EQ(transactions.count(query), 1);
 }
 
 // 验证禁止跨家庭转账，失败后两个资产的余额均保持不变。
@@ -488,21 +507,21 @@ TEST_F(ServiceFixture, LiabilityOpeningBalanceMustBeNonPositive) {
   EXPECT_THROW(assets.create(household_.id, input), ApiError);
 }
 
-// 验证删除资产会级联删除其全部流水，删除后资产与流水均不存在。
-TEST_F(ServiceFixture, AssetDeleteCascadesTransactions) {
+// 有交易的资产禁止硬删除，交易与资产历史保持完整。
+TEST_F(ServiceFixture, AssetWithHistoryCannotBeDeleted) {
   const Asset cash = make_asset("活期", AssetType::Cash, 1000000);
   TransactionService transactions(database_);
   transactions.record_income(household_.id, cash.id, "工资", 100000, "", std::nullopt);
   transactions.record_expense(household_.id, cash.id, "餐饮", 5000, "", std::nullopt);
 
   AssetService assets(database_);
-  assets.remove(cash.id);
-  EXPECT_THROW(assets.get(cash.id), ApiError);
+  EXPECT_THROW(assets.remove(cash.id), ApiError);
+  EXPECT_NO_THROW(assets.get(cash.id));
 
   TransactionQuery query;
   query.household_id = household_.id;
   query.asset_id = cash.id;
-  EXPECT_EQ(transactions.count(query), 0);
+  EXPECT_EQ(transactions.count(query), 2);
 }
 
 // 验证删除收入流水会回滚资产余额。
@@ -524,7 +543,7 @@ TEST_F(ServiceFixture, DeleteTransferRemovesPairAndRestoresBalances) {
   TransactionService transactions(database_);
   const auto result =
       transactions.transfer(household_.id, cash.id, stock_fund.id, 300000, "", std::nullopt);
-  EXPECT_EQ(transactions.remove(result.outgoing.id), 2);
+  EXPECT_EQ(transactions.remove(result.id), 1);
 
   AssetService assets(database_);
   EXPECT_EQ(assets.get(cash.id).current_balance, 1000000);
@@ -541,13 +560,134 @@ TEST_F(ServiceFixture, DeleteTransferWithoutRollbackKeepsBothBalances) {
   TransactionService transactions(database_);
   const auto transfer = transactions.transfer(household_.id, source.id, target.id, 500, "",
                                               std::nullopt);
-  EXPECT_EQ(transactions.remove(transfer.outgoing.id, false), 2);
+  EXPECT_EQ(transactions.remove(transfer.id, false), 1);
   AssetService assets(database_);
   EXPECT_EQ(assets.get(source.id).current_balance, 9500);
   EXPECT_EQ(assets.get(target.id).current_balance, 1500);
   TransactionQuery query;
   query.household_id = household_.id;
   EXPECT_EQ(transactions.count(query), 0);
+}
+
+TEST_F(ServiceFixture, InvestmentBuyIsNeutralAndStoresBothAssetMovements) {
+  const Asset source=make_asset("银行卡",AssetType::Cash,500000);
+  const Asset target=make_asset("债基",AssetType::BondFund,0);
+  TransactionService service(database_);
+  const auto tx=service.investment_buy(household_.id,source.id,target.id,125000,"",std::nullopt);
+  EXPECT_EQ(tx.type,TransactionType::Investment);
+  EXPECT_EQ(tx.action,InvestmentAction::Buy);
+  const auto entries=TransactionRepository(database_).entries(tx.id);
+  ASSERT_EQ(entries.size(),2u);
+  EXPECT_EQ(entries[0].direction,TransactionDirection::Out);
+  EXPECT_EQ(entries[1].direction,TransactionDirection::In);
+  EXPECT_EQ(AssetService(database_).get(source.id).current_balance,375000);
+  EXPECT_EQ(AssetService(database_).get(target.id).current_balance,125000);
+  const auto dto=service.dto(tx.id);
+  EXPECT_EQ(dto.direction,DisplayDirection::Neutral);
+  EXPECT_EQ(dto.title,"买入");
+  EXPECT_EQ(dto.subtitle,"银行卡 → 债基");
+}
+
+TEST_F(ServiceFixture, LinkedRecurringInvestmentCannotBeEditedIntoAnotherBusinessType) {
+  const Asset source=make_asset("付款资产",AssetType::Cash,500000);
+  const Asset target=make_asset("定投基金",AssetType::StockFund,0);
+  TransactionService service(database_);
+  const auto tx=service.investment_buy(household_.id,source.id,target.id,1000,"",std::nullopt);
+  const auto now=time_util::now_iso8601();
+  Statement plan(database_,"INSERT INTO recurring_investment_plan "
+    "(household_id,owner_member_id,target_asset_id,source_asset_id,amount,frequency,start_date,next_due_date,status,created_at,updated_at) "
+    "VALUES (?,?,?,?,?,'DAILY','2026-09-26','2026-09-27','ACTIVE',?,?);");
+  plan.bind(1,household_.id).bind(2,source.owner_member_id).bind(3,target.id).bind(4,source.id)
+      .bind(5,1000).bind(6,now).bind(7,now).run();
+  const auto plan_id=database_.last_insert_rowid();
+  Statement execution(database_,"INSERT INTO recurring_investment_execution "
+    "(plan_id,scheduled_date,amount,source_asset_id,target_asset_id,status,transaction_id,created_at,updated_at) "
+    "VALUES (?,?,?,?,?,'SUCCESS',?,?,?);");
+  execution.bind(1,plan_id).bind(2,time_util::business_today()).bind(3,1000).bind(4,source.id)
+      .bind(5,target.id).bind(6,tx.id).bind(7,now).bind(8,now).run();
+
+  TransactionInput edited;edited.type=TransactionType::Transfer;edited.transaction_time=tx.transaction_time;
+  edited.entries={{source.id,TransactionDirection::Out,1000},{target.id,TransactionDirection::In,1000}};
+  EXPECT_THROW(service.update(tx.id,edited),ApiError);
+  EXPECT_EQ(service.get(tx.id).type,TransactionType::Investment);
+  EXPECT_EQ(AssetService(database_).get(source.id).current_balance,499000);
+  Statement check(database_,"SELECT status,transaction_id FROM recurring_investment_execution WHERE plan_id=?;");
+  check.bind(1,plan_id);ASSERT_TRUE(check.step());EXPECT_EQ(check.get_text(0),"SUCCESS");EXPECT_EQ(check.get_int64(1),tx.id);
+}
+
+TEST_F(ServiceFixture, UpdatingCategoryPreservesHistoricalEntrySnapshots) {
+  const Asset cash=make_asset("银行卡",AssetType::Cash,1000);
+  TransactionService service(database_);
+  const auto income=service.record_income(household_.id,cash.id,"工资",100,"",std::nullopt);
+  service.record_expense(household_.id,cash.id,std::nullopt,50,"",std::nullopt);
+  const auto before=TransactionRepository(database_).entries(income.id);
+  ASSERT_EQ(before.size(),1u);
+  AssetService(database_).update_status(cash.id,AssetStatus::Closed);
+  EXPECT_NO_THROW(service.update_category(income.id,std::nullopt));
+  const auto after=TransactionRepository(database_).entries(income.id);
+  ASSERT_EQ(after.size(),1u);
+  EXPECT_EQ(after[0].id,before[0].id);
+  EXPECT_EQ(after[0].balance_before,before[0].balance_before);
+  EXPECT_EQ(after[0].balance_after,before[0].balance_after);
+  EXPECT_EQ(AssetService(database_).get(cash.id).current_balance,1050);
+}
+
+TEST_F(ServiceFixture, AssetTransactionViewUsesTheSelectedEntriesDirection) {
+  const Asset source=make_asset("银行卡",AssetType::Cash,50000);
+  const Asset target=make_asset("支付宝",AssetType::Cash,5000);
+  TransactionService service(database_);
+  const auto tx=service.transfer(household_.id,source.id,target.id,1200,"",std::nullopt);
+  TransactionQuery q;q.household_id=household_.id;
+  const auto outgoing=service.list_asset_dto(source.id,q);
+  const auto incoming=service.list_asset_dto(target.id,q);
+  ASSERT_EQ(outgoing.size(),1u);ASSERT_EQ(incoming.size(),1u);
+  EXPECT_EQ(outgoing[0].transaction.id,tx.id);EXPECT_EQ(outgoing[0].direction,DisplayDirection::Out);
+  EXPECT_EQ(incoming[0].direction,DisplayDirection::In);
+  EXPECT_EQ(outgoing[0].subtitle,"转至支付宝");
+}
+
+TEST_F(ServiceFixture, EditingTransferReversesOldEntriesAndAppliesNewOnes) {
+  const Asset source=make_asset("银行卡",AssetType::Cash,10000);
+  const Asset old_target=make_asset("支付宝",AssetType::Cash,1000);
+  const Asset new_target=make_asset("微信",AssetType::Cash,500);
+  TransactionService service(database_);
+  const auto tx=service.transfer(household_.id,source.id,old_target.id,1000,"",std::nullopt);
+  TransactionInput edited;edited.type=TransactionType::Transfer;edited.transaction_time=tx.transaction_time;
+  edited.entries={{source.id,TransactionDirection::Out,1500},{new_target.id,TransactionDirection::In,1500}};
+  service.update(tx.id,edited);
+  EXPECT_EQ(AssetService(database_).get(source.id).current_balance,8500);
+  EXPECT_EQ(AssetService(database_).get(old_target.id).current_balance,1000);
+  EXPECT_EQ(AssetService(database_).get(new_target.id).current_balance,2000);
+  const auto entries=TransactionRepository(database_).entries(tx.id);
+  ASSERT_EQ(entries.size(),2u);EXPECT_EQ(entries[0].amount,1500);EXPECT_EQ(entries[1].asset_id,new_target.id);
+}
+
+TEST_F(ServiceFixture, AssetWithTransactionEntriesCannotBeHardDeleted) {
+  const Asset cash=make_asset("有流水资产",AssetType::Cash,1000);
+  TransactionService(database_).record_income(household_.id,cash.id,std::nullopt,100,"",std::nullopt);
+  EXPECT_THROW(AssetService(database_).remove(cash.id),ApiError);
+  EXPECT_NO_THROW(AssetService(database_).get(cash.id));
+}
+
+TEST_F(ServiceFixture, InvalidMultiEntryTransactionWritesNothing) {
+  const Asset source=make_asset("来源",AssetType::Cash,10000);
+  const Asset target=make_asset("目标",AssetType::Cash,0);
+  TransactionService service(database_);TransactionInput in;in.type=TransactionType::Transfer;
+  in.entries={{source.id,TransactionDirection::Out,100},{target.id,TransactionDirection::In,99}};
+  EXPECT_THROW(service.create(household_.id,in),ApiError);
+  TransactionQuery q;q.household_id=household_.id;EXPECT_EQ(service.count(q),0);
+  EXPECT_EQ(AssetService(database_).get(source.id).current_balance,10000);
+  EXPECT_EQ(AssetService(database_).get(target.id).current_balance,0);
+}
+
+TEST_F(ServiceFixture, RejectsAmountsAndBalancesOutsideInt64RangeAtomically) {
+  const Asset maxed=make_asset("达到余额上限",AssetType::Cash,std::numeric_limits<std::int64_t>::max());
+  TransactionService service(database_);
+  EXPECT_THROW(service.record_income(household_.id,maxed.id,std::nullopt,1,"",std::nullopt),ApiError);
+  EXPECT_THROW(service.record_adjustment(household_.id,maxed.id,std::numeric_limits<std::int64_t>::min(),"",std::nullopt),ApiError);
+  EXPECT_EQ(AssetService(database_).get(maxed.id).current_balance,std::numeric_limits<std::int64_t>::max());
+  TransactionQuery query;query.household_id=household_.id;
+  EXPECT_EQ(service.count(query),0);
 }
 
 // 验证删除不存在的流水抛 not_found。

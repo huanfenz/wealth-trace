@@ -74,7 +74,7 @@ wealth-trace/
 │   ├── src/{api,components,views,router,stores,types,utils}/
 │   └── vite.config.ts          # /api 代理到后端
 │
-├── migrations/                 # SQL migration（001–011，含资产类型与定投计划）
+├── migrations/                 # SQL migration（001–013，含交易 Entry 模型）
 ├── data/                       # SQLite 数据库文件（运行时生成）
 ├── docs/                       # API 与设计问题说明
 └── scripts/                    # 冒烟测试脚本
@@ -184,6 +184,7 @@ meson compile -C build
 - 数据库文件默认 `data/caiji.db`，可通过配置修改；
 - 表结构全部由 `migrations/*.sql` 管理，不在业务代码中散落建表 SQL；
 - 迁移记录表：`schema_migration(version, name, applied_at)`；
+- 013 将旧流水迁移为业务交易与资产 Entry。执行前会检查转账成对关系、定投执行关联和资产购买目标；发现无法可靠转换的记录时会列出记录 ID 并中止，修复数据后再启动。迁移失败不会应用 013。
 - 迁移文件命名：`<版本号>_<描述>.sql`，按版本升序执行；
 - 每个迁移在独立事务中执行，失败即整体回滚并停止启动。
 
@@ -221,7 +222,11 @@ meson test -C build
 测试覆盖金额/利率换算、时间格式、数据库与 migration、外键、事务回滚，以及核心财务流程：
 
 - 收入/支出对余额的影响
-- 转账生成两条 `TRANSFER_OUT`/`TRANSFER_IN` 且 `transfer_group_id` 一致
+- 转账作为一个 `TRANSFER` 交易保存，包含一条 `OUT` 和一条 `IN` Entry
+- 投资买入的中性展示、Entry 余额变化、编辑转账时替换 Entries
+- 全局及单资产流水 DTO 的方向、无效多 Entry 交易不产生部分写入
+- int64 金额边界、删除有流水资产限制
+- 旧交易/定投迁移及异常历史数据的迁移预检
 - 跨家庭转账被拒绝
 - 余额调整可正可负
 - 关闭资产后禁止交易
@@ -234,7 +239,7 @@ meson test -C build
 冒烟脚本（需要先构建后端）：
 
 ```bash
-bash scripts/run_api_smoke.sh    # 启动后端 + 跑完整 API 收支/转账/统计流程
+bash scripts/run_api_smoke.sh    # 使用临时数据库及独立端口，跑 API 收支/转账/统计流程
 bash scripts/dev_smoke.sh        # 后端 + Vite 开发服务器联调
 bash scripts/static_smoke.sh     # 验证后端静态托管前端
 ```
@@ -318,21 +323,25 @@ WEALTH_TRACE_CONFIG=/path/to/config.json ./build/backend/wealth-trace
 | GET/POST | `/api/households/{id}/assets` | 资产列表/创建（可带明细） |
 | POST | `/api/households/{id}/assets/maintenance-preview` | 创建资产时的「添加时维护」预览 |
 | GET/PUT | `/api/assets/{id}` | 资产详情/更新 |
-| DELETE | `/api/assets/{id}` | 删除资产（级联删除流水与明细） |
+| DELETE | `/api/assets/{id}` | 删除无交易 Entry 的资产；有历史时需关闭 |
 | PUT | `/api/assets/{id}/status` | 启用/关闭资产 |
 | PUT | `/api/assets/{id}/detail` | 更新资产专有明细 |
 | GET | `/api/households/{id}/transactions` | 流水查询（成员/资产/类型/时间） |
+| GET | `/api/assets/{id}/transactions` | 单资产视角流水 |
+| POST | `/api/households/{id}/transactions` | 创建通用交易 |
 | POST | `/api/households/{id}/transactions/income` | 记账收入 |
 | POST | `/api/households/{id}/transactions/expense` | 记账支出 |
 | POST | `/api/households/{id}/transactions/adjustment` | 余额调整 |
-| POST | `/api/households/{id}/transfers` | 转账（两条流水） |
+| POST | `/api/households/{id}/transfers` | 转账（单笔交易、两条 Entry） |
+| POST | `/api/households/{id}/investments/buy` | 投资买入 |
 | GET/POST | `/api/households/{id}/investment-plans` | 定投计划列表 / 创建 |
 | PUT/DELETE | `/api/investment-plans/{id}` | 更新 / 删除定投计划 |
 | PUT | `/api/investment-plans/{id}/status` | 暂停 / 恢复定投计划 |
 | POST | `/api/investment-plans/{id}/execute` | 立即执行一次定投 |
 | GET | `/api/investment-plans/{id}/executions` | 定投执行历史 |
 | POST | `/api/investment-executions/{id}/retry` | 重试失败定投期次 |
-| GET | `/api/transactions/{id}` | 单条流水 |
+| GET | `/api/transactions/{id}` | 单笔交易详情 |
+| PUT | `/api/transactions/{id}` | 更新交易及其 Entries |
 | PUT | `/api/transactions/{id}/category` | 修改收入或支出流水的分类 |
 | DELETE | `/api/transactions/{id}` | 删除流水（可选回滚余额，转账成对处理） |
 | GET | `/api/households/{id}/statistics/overview` | 家庭总览 |

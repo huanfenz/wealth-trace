@@ -231,9 +231,9 @@ AssetBundle AssetService::create(std::int64_t household_id, const AssetCreateInp
   if (payment_source.has_value() && asset.asset_type == AssetType::Liability) {
     throw invalid_request("liability cannot be paid from another asset");
   }
-  // 新资产尚无交易，current_balance 即等于期初余额。
-  asset.opening_balance = input.opening_balance;
-  asset.current_balance = input.opening_balance;
+  // 有付款来源时由买入交易的目标 Entry 建立余额；无付款来源时以期初余额初始化。
+  asset.opening_balance = payment_source ? 0 : input.opening_balance;
+  asset.current_balance = asset.opening_balance;
   asset.status = AssetStatus::Active;
   asset.remark = clean_optional(input.remark, "remark", 500);
   asset.created_at = time_util::now_iso8601();
@@ -306,21 +306,33 @@ AssetBundle AssetService::create(std::int64_t household_id, const AssetCreateInp
   if (payment_source.has_value()) {
     // 期初金额仍是新资产的本金；付款只在来源资产记扣款流水。
     // 创建、明细、扣款及流水在同一事务里，失败时全部回滚。
-    Transaction payment;
-    payment.household_id = household_id;
-    payment.owner_member_id = payment_source->owner_member_id;
-    payment.asset_id = payment_source->id;
-    payment.type = TransactionType::AssetPurchase;
-    payment.amount = input.opening_balance;
-    payment.balance_before = payment_source->current_balance;
-    payment.balance_after = payment_source->current_balance - input.opening_balance;
-    payment.transaction_time = asset.created_at;
-    payment.remark = "购入资产「" + asset.name + "」(#" + std::to_string(asset.id) + ")";
-    payment.status = TransactionStatus::Normal;
-    payment.created_at = asset.created_at;
-    payment.updated_at = asset.created_at;
-    transactions_.create(payment);
-    assets_.update_balance(payment_source->id, *payment.balance_after, asset.created_at);
+    Transaction purchase;
+    purchase.household_id = household_id;
+    purchase.owner_member_id = payment_source->owner_member_id;
+    purchase.type = TransactionType::Investment;
+    purchase.action = InvestmentAction::Buy;
+    purchase.transaction_time = asset.created_at;
+    purchase.remark = "购入资产「" + asset.name + "」(#" + std::to_string(asset.id) + ")";
+    purchase.status = TransactionStatus::Normal;
+    purchase.created_at = asset.created_at;
+    purchase.updated_at = asset.created_at;
+    purchase.id = transactions_.create(purchase);
+    const auto source_after = payment_source->current_balance - input.opening_balance;
+    TransactionEntry source_entry;
+    source_entry.transaction_id=purchase.id; source_entry.household_id=household_id;
+    source_entry.owner_member_id=payment_source->owner_member_id; source_entry.asset_id=payment_source->id;
+    source_entry.direction=TransactionDirection::Out; source_entry.amount=input.opening_balance;
+    source_entry.balance_before=payment_source->current_balance; source_entry.balance_after=source_after;
+    source_entry.created_at=asset.created_at; transactions_.add_entry(source_entry);
+    TransactionEntry target_entry;
+    target_entry.transaction_id=purchase.id; target_entry.household_id=household_id;
+    target_entry.owner_member_id=asset.owner_member_id; target_entry.asset_id=asset.id;
+    target_entry.direction=TransactionDirection::In; target_entry.amount=input.opening_balance;
+    target_entry.balance_before=0; target_entry.balance_after=input.opening_balance;
+    target_entry.created_at=asset.created_at; transactions_.add_entry(target_entry);
+    transactions_.add_investment_detail(purchase.id,asset.id,InvestmentAction::Buy,input.opening_balance);
+    assets_.update_balance(payment_source->id, source_after, asset.created_at);
+    assets_.update_balance(asset.id, input.opening_balance, asset.created_at);
   }
   transaction.commit();
 
@@ -573,7 +585,10 @@ AssetBundle AssetService::update_detail(std::int64_t id, AssetType detail_type,
 void AssetService::remove(std::int64_t id) {
   std::scoped_lock lock(database_.mutex());
   get(id);  // 不存在则抛 not_found
-  // 资产、明细与流水通过外键级联删除，包在一个事务里保证整体一致。
+  if (transactions_.count_by_asset(id) > 0) {
+    throw conflict("assets with transaction entries cannot be deleted; close the asset instead");
+  }
+  // Entry 外键限制保留完整交易历史。
   TransactionGuard transaction(database_);
   assets_.remove(id);
   transaction.commit();

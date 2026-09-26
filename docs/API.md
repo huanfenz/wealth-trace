@@ -63,7 +63,7 @@
     "account_types": ["BANK", "ALIPAY", "WECHAT", "CASH", "SECURITIES", "INSURANCE", "OTHER"],
     "asset_types": ["CASH", "TERM_DEPOSIT", "STOCK_FUND", "BOND_FUND", "FLEXIBLE_TERM", "COMMERCIAL_PENSION", "INSURANCE", "LIABILITY", "OTHER"],
     "asset_statuses": ["ACTIVE", "CLOSED"],
-    "transaction_types": ["INCOME", "EXPENSE", "TRANSFER_IN", "TRANSFER_OUT", "ADJUSTMENT", "ASSET_PURCHASE"],
+    "transaction_types": ["INCOME", "EXPENSE", "TRANSFER", "INVESTMENT", "ADJUSTMENT"],
     "term_units": ["DAY", "MONTH", "YEAR"],
     "income_categories": ["工资", "奖金", "..."],
     "expense_categories": ["餐饮", "交通", "..."],
@@ -231,7 +231,7 @@
 创建资产。`account_id` 决定 `household_id` 与 `owner_member_id`（冗余字段自动从账户派生）。
 可选传 `payment_asset_id`，从同一家庭的一项有效资产支付 `opening_balance`。
 新资产仍以该金额作为期初本金；服务端会在同一事务中创建资产、扣除付款资产余额，
-并在付款资产上写入 `ASSET_PURCHASE` 流水。付款资产须有足够余额，且不能是负债；
+提供 `payment_asset_id` 时，会创建一笔 `INVESTMENT/BUY` 交易，在付款资产上写 `OUT` Entry、在新资产上写 `IN` Entry。付款资产须有足够余额，且不能是负债；
 受转出限制的定活理财、商业养老金也须满足其转出条件。留空则直接创建金额，
 不扣除其他资产。该流水不计入收入或支出统计。
 
@@ -438,7 +438,7 @@
 
 ### `DELETE /api/assets/{id}`
 
-删除资产，成功返回 `data: null`。其名下全部流水与明细块会级联删除，不可恢复。
+删除无交易 Entry 的资产，成功返回 `data: null`。有交易历史的资产只能关闭，不能硬删除。
 
 ---
 
@@ -452,7 +452,7 @@
 | --- | --- |
 | `owner_member_id` | 按成员过滤 |
 | `asset_id` | 按资产过滤 |
-| `type` | INCOME/EXPENSE/TRANSFER_IN/TRANSFER_OUT/ADJUSTMENT/ASSET_PURCHASE |
+| `type` | INCOME/EXPENSE/TRANSFER/INVESTMENT/ADJUSTMENT |
 | `from` / `to` | 时间范围（`YYYY-MM-DD HH:MM:SS`，含端点） |
 | `limit` | 1..1000，默认 200 |
 | `offset` | 默认 0 |
@@ -460,10 +460,30 @@
 返回：
 
 ```json
-{ "total": 2, "items": [ { "id": 1, "type": "TRANSFER_OUT", "amount": 500000, "asset_id": 10, "transfer_group_id": 10001 } ] }
+{ "total": 1, "items": [ { "id": 1, "type": "TRANSFER", "title": "转账", "subtitle": "银行卡 → 支付宝", "amount": 500000, "direction": "NEUTRAL" } ] }
 ```
 
-每一条底层流水单独计数和分页。转账在结果中分别返回转出与转入两条流水。
+列表按业务交易计数和分页。轻量交易 DTO 包含 `title`、`subtitle`、`amount` 和展示方向；转账只出现一次。收支方向为 `IN` / `OUT`，转账和投资买入为 `NEUTRAL`。
+
+### `GET /api/assets/{asset_id}/transactions?household_id={id}`
+
+资产视角流水。转账会按当前资产对应 Entry 展示 `IN` 或 `OUT`，同时在副标题中给出对端资产名称。
+
+### `POST /api/households/{id}/transactions`
+
+通用交易写入接口。`entries` 中金额为正整数分，方向相对 Entry 对应资产：
+
+```json
+{
+  "type": "EXPENSE",
+  "category_id": 2,
+  "entries": [{ "asset_id": 10, "direction": "OUT", "amount": 3500 }],
+  "transaction_time": "2026-09-26 12:30:00",
+  "remark": "午餐"
+}
+```
+
+收入、支出和调整要求一个 Entry；转账与买入要求两个资产不同、方向相反且金额相等的 Entries。现有收入、支出、转账和调整专用接口保留为业务化封装。
 
 ### `POST /api/households/{id}/transactions/income`
 
@@ -487,7 +507,7 @@
 
 ### `POST /api/households/{id}/transfers`
 
-一次转账生成 `TRANSFER_OUT` + `TRANSFER_IN` 两条流水，共用 `transfer_group_id`：
+一次转账生成一个 `TRANSFER` Transaction 和两条 Entry：
 
 ```json
 {
@@ -499,31 +519,31 @@
 }
 ```
 
-返回：
+返回一个交易 DTO，方向为 `NEUTRAL`，详情中包含两条 Entry。
 
-```json
-{
-  "outgoing": { "type": "TRANSFER_OUT", "amount": 500000, "transfer_group_id": 10001, "...": "..." },
-  "incoming": { "type": "TRANSFER_IN", "amount": 500000, "transfer_group_id": 10001, "...": "..." }
-}
-```
+### `POST /api/households/{id}/investments/buy`
+
+请求字段与转账一致，执行投资 `BUY`，记录 `INVESTMENT` 交易并关联投资资产明细。该类型不计入普通支出。
+资金来源为定活理财或商业养老金时，同样遵守该资产的转出/赎回日期限制。
 
 ### `GET /api/transactions/{id}`
 
-返回单条流水。
+返回完整交易 DTO 和 Entries。
+
+### `PUT /api/transactions/{id}`
+
+按创建接口的 `type` / `category_id` / `entries` / `transaction_time` / `remark` 更新交易。替换 Entries 和各资产余额在同一 SQLite 事务中完成。
+已关联成功定投执行记录的交易不能通过此接口编辑，以保持执行历史与交易一致。
 
 ### `PUT /api/transactions/{id}/category`
 
-只修改收入或支出流水的分类，返回更新后的流水。请求体为 `{"category_id": 1}`；
+只修改收入或支出交易的分类，返回更新后的 DTO。请求体为 `{"category_id": 1}`；
 传入 `null` 可清空分类。分类必须启用，且属于同一家庭及相同的收支类型。
-金额和资产余额不变；转账、余额调整及其他类型流水不能通过此接口修改分类。
+Entry、历史余额快照和资产当前余额不变；转账、投资、余额调整不能通过此接口修改分类。
 
 ### `DELETE /api/transactions/{id}`
 
-删除流水，普通流水返回 `{"deleted": 1}`。查询参数 `rollback_assets` 可为 `true` 或 `false`，
-默认 `true`，删除时回滚资产余额；设为 `false` 时仅删除流水，资产余额保持不变。
-若该流水属于转账，会同组删除配对的两条底层流水，返回 `{"deleted": 2}`。若该转账来自定投，仅在回滚余额时将对应
-执行记录标记为 `REVERSED`。
+删除一笔完整交易，返回 `{"deleted": 1}`。`rollback_assets` 默认 `true` 并回滚所有 Entry 造成的余额变化；设为 `false` 时删除交易和 Entries、保留资产当前余额。定投执行记录通过 `transaction_id` 关联；回滚删除时标记为 `REVERSED`，保留余额删除时执行记录仍为 `SUCCESS` 且关联置空。
 
 ---
 

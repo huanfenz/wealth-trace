@@ -103,8 +103,7 @@ TransactionCategory CategoryService::update(std::int64_t household_id, std::int6
   try {
     Statement s(database_, "UPDATE transaction_category SET name = ?, sort_order = ?, updated_at = ? WHERE id = ?;");
     s.bind(1, name).bind(2, sort_order).bind(3, now).bind(4, id).run();
-    // 保留旧文本字段供旧客户端读取，同时让历史交易显示新名称。
-    Statement update_tx(database_, "UPDATE \"transaction\" SET category = ?, updated_at = ? WHERE category_id = ?;");
+    Statement update_tx(database_, "UPDATE transactions SET category = ?, updated_at = ? WHERE category_id = ?;");
     update_tx.bind(1, name).bind(2, now).bind(3, id).run();
   } catch (const std::exception&) { throw conflict("category name already exists"); }
   tx.commit();

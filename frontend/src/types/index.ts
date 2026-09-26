@@ -24,10 +24,12 @@ export type AssetStatus = 'ACTIVE' | 'CLOSED' // 资产状态：有效 / 已关�
 export type TransactionType =
   | 'INCOME' // 收入
   | 'EXPENSE' // 支出
-  | 'TRANSFER_IN' // 转账转入
-  | 'TRANSFER_OUT' // 转账转出
+  | 'TRANSFER' // 转账
+  | 'INVESTMENT' // 投资业务
   | 'ADJUSTMENT' // 余额调整
-  | 'ASSET_PURCHASE' // 购入新资产时从付款资产扣款
+export type TransactionEntryDirection = 'IN' | 'OUT'
+export type TransactionDisplayDirection = 'IN' | 'OUT' | 'NEUTRAL'
+export type InvestmentAction = 'BUY' | 'REDEEM' | 'DIVIDEND' | 'INTEREST' | 'MATURITY' | 'ROLL_OVER'
 export type TermUnit = 'DAY' | 'MONTH' | 'YEAR' // 期限单位：天 / 月 / 年
 
 /** 家庭。 */
@@ -168,19 +170,33 @@ export interface Transaction {
   id: number
   household_id: number
   owner_member_id: number // 属主成员
-  asset_id: number // 关联资产
   type: TransactionType
   category_id: number | null
-  category: string | null // 收支分类（可空）
-  amount: number // 金额（分），支出/转出存正值，方向由 type 决定
-  transfer_group_id: number | null // 转账分组 ID，配对转入/转出（可空）
-  balance_before: number | null // 交易前余额（分，可空）
-  balance_after: number | null // 交易后余额（分，可空）
+  category: string | null
+  action: InvestmentAction | null
+  title: string
+  subtitle: string | null
+  amount: number // 金额（分）
+  direction: TransactionDisplayDirection
+  source_asset: { id: number; name: string } | null
+  destination_asset: { id: number; name: string } | null
+  entries?: TransactionEntry[]
   transaction_time: string
   remark: string | null // 备注（可空）
   status: string // 交易状态
   created_at: string
   updated_at: string
+}
+
+export interface TransactionEntry {
+  id: number
+  transaction_id: number
+  owner_member_id: number
+  asset_id: number
+  direction: TransactionEntryDirection
+  amount: number
+  balance_before: number | null
+  balance_after: number | null
 }
 
 export interface TransactionCategory {
@@ -205,7 +221,7 @@ export interface RecurringInvestmentPlan {
 export interface RecurringInvestmentExecution {
   id: number; plan_id: number; scheduled_date: string; amount: number
   source_asset_id: number | null; target_asset_id: number | null
-  status: 'SUCCESS' | 'FAILED' | 'REVERSED'; transfer_group_id: number | null
+  status: 'SUCCESS' | 'FAILED' | 'REVERSED'; transaction_id: number | null
   failure_reason: string | null; created_at: string; updated_at: string
 }
 

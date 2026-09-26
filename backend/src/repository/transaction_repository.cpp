@@ -1,228 +1,106 @@
-// transaction_repository.cpp："transaction" 表的 SQL 实现与行映射；
-// 动态过滤条件由 build_where 生成、apply_bindings 统一绑定。
 #include "repository/transaction_repository.hpp"
 
-#include <cstdint>
-#include <optional>
 #include <string>
-#include <vector>
+#include <utility>
 
 #include "database/database.hpp"
 #include "database/statement.hpp"
 
 namespace wt {
 namespace {
-
-// 行映射：列下标必须与 kSelectColumns 的顺序严格一致。
-// 0=id 1=household_id 2=owner_member_id 3=asset_id 4=type 5=category_id 6=category 7=amount
-// 8=transfer_group_id 9=balance_before 10=balance_after 11=transaction_time
-// 12=remark 13=status 14=created_at 15=updated_at
-// 金额单位：分。枚举解析失败回退 Adjustment / Normal。
-Transaction map_transaction(Statement& statement) {
-  Transaction transaction;
-  transaction.id = statement.get_int64(0);
-  transaction.household_id = statement.get_int64(1);
-  transaction.owner_member_id = statement.get_int64(2);
-  transaction.asset_id = statement.get_int64(3);
-  transaction.type =
-      parse_transaction_type(statement.get_text(4)).value_or(TransactionType::Adjustment);
-  transaction.category_id = statement.get_optional_int64(5);
-  transaction.category = statement.get_optional_text(6);
-  transaction.amount = statement.get_int64(7);
-  transaction.transfer_group_id = statement.get_optional_int64(8);
-  transaction.balance_before = statement.get_optional_int64(9);
-  transaction.balance_after = statement.get_optional_int64(10);
-  transaction.transaction_time = statement.get_text(11);
-  transaction.remark = statement.get_optional_text(12);
-  transaction.status =
-      parse_transaction_status(statement.get_text(13)).value_or(TransactionStatus::Normal);
-  transaction.created_at = statement.get_text(14);
-  transaction.updated_at = statement.get_text(15);
-  return transaction;
+Transaction read_transaction(Statement& s) {
+  Transaction t;
+  t.id=s.get_int64(0); t.household_id=s.get_int64(1); t.owner_member_id=s.get_int64(2);
+  t.type=parse_transaction_type(s.get_text(3)).value_or(TransactionType::Adjustment);
+  t.category_id=s.get_optional_int64(4); t.category=s.get_optional_text(5);
+  if (const auto action=s.get_optional_text(6); action) t.action=parse_investment_action(*action);
+  t.transaction_time=s.get_text(7); t.remark=s.get_optional_text(8);
+  t.status=parse_transaction_status(s.get_text(9)).value_or(TransactionStatus::Normal);
+  t.created_at=s.get_text(10); t.updated_at=s.get_text(11); return t;
+}
+constexpr const char* kColumns =
+  "id,household_id,owner_member_id,type,category_id,category,action,transaction_time,remark,status,created_at,updated_at";
+std::string where_clause(const TransactionQuery& q, std::vector<std::string>& texts,
+                         std::vector<std::int64_t>& ints) {
+  std::string w=" WHERE t.household_id=?"; ints.push_back(q.household_id);
+  if(q.owner_member_id){w+=" AND (t.owner_member_id=? OR EXISTS (SELECT 1 FROM transaction_entries oe WHERE oe.transaction_id=t.id AND oe.owner_member_id=?))";ints.push_back(*q.owner_member_id);ints.push_back(*q.owner_member_id);}
+  if(q.asset_id){w+=" AND EXISTS (SELECT 1 FROM transaction_entries e WHERE e.transaction_id=t.id AND e.asset_id=?)";ints.push_back(*q.asset_id);}
+  if(q.type){w+=" AND t.type=?";texts.emplace_back(to_string(*q.type));}
+  if(q.from_time){w+=" AND t.transaction_time>=?";texts.push_back(*q.from_time);}
+  if(q.to_time){w+=" AND t.transaction_time<=?";texts.push_back(*q.to_time);}
+  return w;
+}
+void bind_query(Statement& s,const std::vector<std::string>& texts,const std::vector<std::int64_t>& ints){
+  int i=1; for(auto v:ints)s.bind(i++,v); for(const auto& v:texts)s.bind(i++,v);
+}
 }
 
-// SELECT 列顺序，与 map_transaction 的下标一一对应。
-constexpr const char* kSelectColumns =
-    "id, household_id, owner_member_id, asset_id, type, category_id, category, amount, "
-    "transfer_group_id, balance_before, balance_after, transaction_time, remark, status, "
-    "created_at, updated_at";
-
-// Builds the WHERE clause shared by list() and count(). Bind parameters are
-// appended to `bindings` in sqlite order.
-// 动态 WHERE：household_id 必选；其余可选字段按固定顺序（成员、资产、类型、
-// 起始时间、结束时间）逐个判断，有值才拼接 " AND 列 = ?"，并记录占位符序号 index。
-// 文本参数与整数参数分开收集，序号与 SQL 中 ? 的位置一一对应。
-// list()/count() 共用此函数，保证两处过滤口径完全一致。
-std::string build_where(const TransactionQuery& query,
-                        std::vector<std::pair<int, std::string>>& text_bindings,
-                        std::vector<std::pair<int, std::int64_t>>& int_bindings) {
-  std::string sql = " WHERE household_id = ?";
-  int index = 1;
-  int_bindings.emplace_back(index++, query.household_id);
-  if (query.owner_member_id.has_value()) {
-    sql += " AND owner_member_id = ?";
-    int_bindings.emplace_back(index++, *query.owner_member_id);
-  }
-  if (query.asset_id.has_value()) {
-    sql += " AND asset_id = ?";
-    int_bindings.emplace_back(index++, *query.asset_id);
-  }
-  if (query.type.has_value()) {
-    sql += " AND type = ?";
-    text_bindings.emplace_back(index++, std::string(to_string(*query.type)));
-  }
-  if (query.from_time.has_value()) {
-    sql += " AND transaction_time >= ?";
-    text_bindings.emplace_back(index++, *query.from_time);
-  }
-  if (query.to_time.has_value()) {
-    sql += " AND transaction_time <= ?";
-    text_bindings.emplace_back(index++, *query.to_time);
-  }
-  return sql;
+std::int64_t TransactionRepository::create(const Transaction& t) {
+  Statement s(database_,"INSERT INTO transactions (household_id,owner_member_id,type,category_id,category,action,transaction_time,remark,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?);");
+  s.bind(1,t.household_id).bind(2,t.owner_member_id).bind(3,std::string(to_string(t.type)))
+   .bind_optional_int64(4,t.category_id).bind_optional_text(5,t.category)
+   .bind_optional_text(6,t.action?std::optional<std::string>(std::string(to_string(*t.action))):std::nullopt)
+   .bind(7,t.transaction_time).bind_optional_text(8,t.remark).bind(9,std::string(to_string(t.status)))
+   .bind(10,t.created_at).bind(11,t.updated_at).run(); return database_.last_insert_rowid();
 }
-
-// 按 build_where 记录的序号绑定参数；文本与整数分两轮绑定，顺序不影响结果。
-void apply_bindings(Statement& statement,
-                    const std::vector<std::pair<int, std::string>>& text_bindings,
-                    const std::vector<std::pair<int, std::int64_t>>& int_bindings) {
-  for (const auto& [index, value] : text_bindings) {
-    statement.bind(index, value);
-  }
-  for (const auto& [index, value] : int_bindings) {
-    statement.bind(index, value);
-  }
-}
-
-}  // namespace
-
-// 插入流水；表名为 SQL 保留字故写作 "transaction"。枚举以文本持久化。
-std::int64_t TransactionRepository::create(const Transaction& transaction) {
-  Statement statement(
-      database_,
-      "INSERT INTO \"transaction\" (household_id, owner_member_id, asset_id, type, category_id, category, "
-      "amount, transfer_group_id, balance_before, balance_after, transaction_time, "
-      "remark, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);");
-  statement.bind(1, transaction.household_id)
-      .bind(2, transaction.owner_member_id)
-      .bind(3, transaction.asset_id)
-      .bind(4, std::string(to_string(transaction.type)))
-      .bind_optional_int64(5, transaction.category_id)
-      .bind_optional_text(6, transaction.category)
-      .bind(7, transaction.amount)
-      .bind_optional_int64(8, transaction.transfer_group_id)
-      .bind_optional_int64(9, transaction.balance_before)
-      .bind_optional_int64(10, transaction.balance_after)
-      .bind(11, transaction.transaction_time)
-      .bind_optional_text(12, transaction.remark)
-      .bind(13, std::string(to_string(transaction.status)))
-      .bind(14, transaction.created_at)
-      .bind(15, transaction.updated_at)
-      .run();
-  return database_.last_insert_rowid();
-}
-
 std::optional<Transaction> TransactionRepository::find_by_id(std::int64_t id) {
-  Statement statement(database_, std::string("SELECT ") + kSelectColumns +
-                                     " FROM \"transaction\" WHERE id = ?;");
-  statement.bind(1, id);
-  if (!statement.step()) {
-    return std::nullopt;
-  }
-  return map_transaction(statement);
+  Statement s(database_,std::string("SELECT ")+kColumns+" FROM transactions WHERE id=?;");
+  s.bind(1,id); if(!s.step())return std::nullopt; return read_transaction(s);
 }
-
-bool TransactionRepository::update_category(
-    std::int64_t id, std::optional<std::int64_t> category_id,
-    const std::optional<std::string>& category, const std::string& updated_at) {
-  Statement statement(database_,
-                      "UPDATE \"transaction\" SET category_id = ?, category = ?, "
-                      "updated_at = ? WHERE id = ?;");
-  statement.bind_optional_int64(1, category_id)
-      .bind_optional_text(2, category)
-      .bind(3, updated_at)
-      .bind(4, id)
-      .run();
-  return database_.changes() > 0;
+bool TransactionRepository::update(const Transaction& t) {
+  Statement s(database_,"UPDATE transactions SET owner_member_id=?,type=?,category_id=?,category=?,action=?,transaction_time=?,remark=?,updated_at=? WHERE id=?;");
+  s.bind(1,t.owner_member_id).bind(2,std::string(to_string(t.type))).bind_optional_int64(3,t.category_id)
+   .bind_optional_text(4,t.category)
+   .bind_optional_text(5,t.action?std::optional<std::string>(std::string(to_string(*t.action))):std::nullopt)
+   .bind(6,t.transaction_time).bind_optional_text(7,t.remark).bind(8,t.updated_at).bind(9,t.id).run();
+  return database_.changes()>0;
 }
-
-// 按转账分组查询配对流水，按 id 升序（转出行先创建，通常排在前）。
-std::vector<Transaction> TransactionRepository::list_by_transfer_group(
-    std::int64_t group_id) {
-  Statement statement(database_, std::string("SELECT ") + kSelectColumns +
-                                     " FROM \"transaction\" WHERE transfer_group_id = ? "
-                                     "ORDER BY id ASC;");
-  statement.bind(1, group_id);
-  std::vector<Transaction> transactions;
-  while (statement.step()) {
-    transactions.push_back(map_transaction(statement));
-  }
-  return transactions;
+bool TransactionRepository::update_category(std::int64_t id,
+    std::optional<std::int64_t> category_id,const std::optional<std::string>& category,
+    const std::string& updated_at) {
+  Statement s(database_,"UPDATE transactions SET category_id=?,category=?,updated_at=? WHERE id=?;");
+  s.bind_optional_int64(1,category_id).bind_optional_text(2,category)
+   .bind(3,updated_at).bind(4,id).run();
+  return database_.changes()>0;
 }
-
 bool TransactionRepository::remove(std::int64_t id) {
-  Statement statement(database_, "DELETE FROM \"transaction\" WHERE id = ?;");
-  statement.bind(1, id);
-  statement.run();
-  return database_.changes() > 0;
+  Statement s(database_,"DELETE FROM transactions WHERE id=?;");s.bind(1,id).run();return database_.changes()>0;
 }
-
-// 列表：拼出 SELECT + build_where + 排序分页，先绑定 WHERE 参数再绑定 LIMIT/OFFSET。
-std::vector<Transaction> TransactionRepository::list(const TransactionQuery& query) {
-  std::vector<std::pair<int, std::string>> text_bindings;
-  std::vector<std::pair<int, std::int64_t>> int_bindings;
-  std::string sql = std::string("SELECT ") + kSelectColumns + " FROM \"transaction\"" +
-                    build_where(query, text_bindings, int_bindings) +
-                    " ORDER BY transaction_time DESC, id DESC LIMIT ? OFFSET ?;";
-
-  // WHERE 里的占位符已占用 1..N，LIMIT/OFFSET 顺延为 N+1、N+2。
-  const int limit_index = 1 + static_cast<int>(text_bindings.size() + int_bindings.size());
-  Statement statement(database_, sql);
-  apply_bindings(statement, text_bindings, int_bindings);
-  statement.bind(limit_index, static_cast<std::int64_t>(query.limit));
-  statement.bind(limit_index + 1, static_cast<std::int64_t>(query.offset));
-
-  std::vector<Transaction> transactions;
-  while (statement.step()) {
-    transactions.push_back(map_transaction(statement));
-  }
-  return transactions;
+std::vector<Transaction> TransactionRepository::list(const TransactionQuery& q) {
+  std::vector<std::string> texts;std::vector<std::int64_t> ints;
+  const auto w=where_clause(q,texts,ints);
+  Statement s(database_,std::string("SELECT ")+kColumns+" FROM transactions t"+w+" ORDER BY t.transaction_time DESC,t.id DESC LIMIT ? OFFSET ?;");
+  bind_query(s,texts,ints);int i=static_cast<int>(ints.size()+texts.size()+1);s.bind(i,q.limit);++i;s.bind(i,q.offset);
+  std::vector<Transaction> out;while(s.step())out.push_back(read_transaction(s));return out;
 }
-
-// 计数：与 list 复用同一 build_where，确保总数与分页查询口径一致。
-std::int64_t TransactionRepository::count(const TransactionQuery& query) {
-  std::vector<std::pair<int, std::string>> text_bindings;
-  std::vector<std::pair<int, std::int64_t>> int_bindings;
-  std::string sql = std::string("SELECT COUNT(*) FROM \"transaction\"") +
-                    build_where(query, text_bindings, int_bindings) + ";";
-
-  Statement statement(database_, sql);
-  apply_bindings(statement, text_bindings, int_bindings);
-  if (statement.step()) {
-    return statement.get_int64(0);
-  }
-  return 0;
+std::int64_t TransactionRepository::count(const TransactionQuery& q) {
+  std::vector<std::string> texts;std::vector<std::int64_t> ints;
+  const auto w=where_clause(q,texts,ints);Statement s(database_,"SELECT COUNT(*) FROM transactions t"+w+";");
+  bind_query(s,texts,ints);return s.step()?s.get_int64(0):0;
 }
-
-// 统计某资产的历史流水条数。
-std::int64_t TransactionRepository::count_by_asset(std::int64_t asset_id) {
-  Statement statement(database_,
-                      "SELECT COUNT(*) FROM \"transaction\" WHERE asset_id = ?;");
-  statement.bind(1, asset_id);
-  if (statement.step()) {
-    return statement.get_int64(0);
-  }
-  return 0;
+std::vector<TransactionEntry> TransactionRepository::entries(std::int64_t id) {
+  Statement s(database_,"SELECT id,transaction_id,household_id,owner_member_id,asset_id,direction,amount,balance_before,balance_after,created_at FROM transaction_entries WHERE transaction_id=? ORDER BY id;");
+  s.bind(1,id);std::vector<TransactionEntry> out;while(s.step()){
+    TransactionEntry e;e.id=s.get_int64(0);e.transaction_id=s.get_int64(1);e.household_id=s.get_int64(2);
+    e.owner_member_id=s.get_int64(3);e.asset_id=s.get_int64(4);e.direction=parse_transaction_direction(s.get_text(5)).value_or(TransactionDirection::In);
+    e.amount=s.get_int64(6);e.balance_before=s.get_optional_int64(7);e.balance_after=s.get_optional_int64(8);e.created_at=s.get_text(9);out.push_back(e);
+  }return out;
 }
-
-// 转账分组 id 生成：取现有最大值 + 1；表为空时 COALESCE 使结果为 1。
-std::int64_t TransactionRepository::next_transfer_group_id() {
-  Statement statement(database_,
-                      "SELECT COALESCE(MAX(transfer_group_id), 0) + 1 FROM \"transaction\";");
-  if (statement.step()) {
-    return statement.get_int64(0);
-  }
-  return 1;
+std::int64_t TransactionRepository::add_entry(const TransactionEntry& e) {
+  Statement s(database_,"INSERT INTO transaction_entries (transaction_id,household_id,owner_member_id,asset_id,direction,amount,balance_before,balance_after,created_at) VALUES (?,?,?,?,?,?,?,?,?);");
+  s.bind(1,e.transaction_id).bind(2,e.household_id).bind(3,e.owner_member_id).bind(4,e.asset_id)
+   .bind(5,std::string(to_string(e.direction))).bind(6,e.amount).bind_optional_int64(7,e.balance_before)
+   .bind_optional_int64(8,e.balance_after).bind(9,e.created_at).run();return database_.last_insert_rowid();
 }
-
+void TransactionRepository::clear_entries(std::int64_t id){Statement s(database_,"DELETE FROM transaction_entries WHERE transaction_id=?;");s.bind(1,id).run();}
+void TransactionRepository::add_investment_detail(std::int64_t tx,std::int64_t asset,InvestmentAction action,std::optional<std::int64_t> principal){
+  Statement s(database_,"INSERT INTO investment_transaction_details (transaction_id,asset_id,action,principal) VALUES (?,?,?,?);");
+  s.bind(1,tx).bind(2,asset).bind(3,std::string(to_string(action))).bind_optional_int64(4,principal).run();
+}
+std::optional<std::pair<std::int64_t,InvestmentAction>> TransactionRepository::investment_detail(std::int64_t tx){
+  Statement s(database_,"SELECT asset_id,action FROM investment_transaction_details WHERE transaction_id=?;");s.bind(1,tx);
+  if(!s.step())return std::nullopt;return std::pair{s.get_int64(0),parse_investment_action(s.get_text(1)).value_or(InvestmentAction::Buy)};
+}
+std::int64_t TransactionRepository::count_by_asset(std::int64_t asset){Statement s(database_,"SELECT COUNT(*) FROM transaction_entries WHERE asset_id=?;");s.bind(1,asset);return s.step()?s.get_int64(0):0;}
+std::optional<std::pair<std::string,std::string>> TransactionRepository::asset_summary(std::int64_t asset){Statement s(database_,"SELECT name,CAST(owner_member_id AS TEXT) FROM asset WHERE id=?;");s.bind(1,asset);if(!s.step())return std::nullopt;return std::pair{s.get_text(0),s.get_text(1)};}
 }  // namespace wt

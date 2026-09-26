@@ -125,13 +125,14 @@ IncomeExpenseSummary StatisticsRepository::income_expense(
     std::int64_t household_id, std::optional<std::int64_t> member_id,
     const std::string& from_time, const std::string& to_time) {
   std::string sql =
-      "SELECT type, COALESCE(SUM(amount), 0) FROM \"transaction\" "
-      "WHERE household_id = ? AND status = 'NORMAL' "
-      "AND type IN ('INCOME', 'EXPENSE') AND transaction_time >= ? AND transaction_time <= ?";
+      "SELECT t.type, COALESCE(SUM(e.amount), 0) FROM transactions t "
+      "JOIN transaction_entries e ON e.transaction_id=t.id "
+      "WHERE t.household_id = ? AND t.status = 'NORMAL' "
+      "AND t.type IN ('INCOME', 'EXPENSE') AND t.transaction_time >= ? AND t.transaction_time <= ?";
   if (member_id.has_value()) {
-    sql += " AND owner_member_id = ?";
+    sql += " AND t.owner_member_id = ?";
   }
-  sql += " GROUP BY type;";
+  sql += " GROUP BY t.type;";
 
   Statement statement(database_, sql);
   statement.bind(1, household_id).bind(2, from_time).bind(3, to_time);
@@ -158,11 +159,12 @@ std::vector<NamedAmount> StatisticsRepository::income_expense_by_member(
   Statement statement(
       database_,
       "SELECT m.id, m.name, "
-      "COALESCE(SUM(CASE WHEN t.type = 'INCOME' THEN t.amount "
-      "                  WHEN t.type = 'EXPENSE' THEN -t.amount ELSE 0 END), 0) "
+      "COALESCE(SUM(CASE WHEN t.type = 'INCOME' AND e.direction='IN' THEN e.amount "
+      "                  WHEN t.type = 'EXPENSE' AND e.direction='OUT' THEN -e.amount ELSE 0 END), 0) "
       "FROM household_member m "
-      "LEFT JOIN \"transaction\" t ON t.owner_member_id = m.id AND t.status = 'NORMAL' "
+      "LEFT JOIN transactions t ON t.owner_member_id = m.id AND t.status = 'NORMAL' "
       "  AND t.transaction_time >= ? AND t.transaction_time <= ? "
+      "LEFT JOIN transaction_entries e ON e.transaction_id=t.id "
       "WHERE m.household_id = ? GROUP BY m.id, m.name ORDER BY m.id ASC;");
   statement.bind(1, from_time).bind(2, to_time).bind(3, household_id);
   std::vector<NamedAmount> result;
@@ -179,9 +181,10 @@ std::vector<CategoryAmount> StatisticsRepository::expense_by_category(
     std::int64_t household_id, const std::string& from_time, const std::string& to_time) {
   Statement statement(
       database_,
-      "SELECT COALESCE(c.name, '未分类'), COALESCE(SUM(t.amount), 0) FROM \"transaction\" t "
+      "SELECT COALESCE(c.name, '未分类'), COALESCE(SUM(e.amount), 0) FROM transactions t "
+      "JOIN transaction_entries e ON e.transaction_id=t.id "
       "LEFT JOIN transaction_category c ON c.id = t.category_id "
-      "WHERE t.household_id = ? AND t.status = 'NORMAL' AND t.type = 'EXPENSE' "
+      "WHERE t.household_id = ? AND t.status = 'NORMAL' AND t.type = 'EXPENSE' AND e.direction='OUT' "
       "AND t.transaction_time >= ? AND t.transaction_time <= ? "
       "GROUP BY t.category_id, c.name ORDER BY 2 DESC;");
   statement.bind(1, household_id).bind(2, from_time).bind(3, to_time);
@@ -198,9 +201,10 @@ std::vector<CategoryAmount> StatisticsRepository::income_by_category(
     std::int64_t household_id, const std::string& from_time, const std::string& to_time) {
   Statement statement(
       database_,
-      "SELECT COALESCE(c.name, '未分类'), COALESCE(SUM(t.amount), 0) FROM \"transaction\" t "
+      "SELECT COALESCE(c.name, '未分类'), COALESCE(SUM(e.amount), 0) FROM transactions t "
+      "JOIN transaction_entries e ON e.transaction_id=t.id "
       "LEFT JOIN transaction_category c ON c.id = t.category_id "
-      "WHERE t.household_id = ? AND t.status = 'NORMAL' AND t.type = 'INCOME' "
+      "WHERE t.household_id = ? AND t.status = 'NORMAL' AND t.type = 'INCOME' AND e.direction='IN' "
       "AND t.transaction_time >= ? AND t.transaction_time <= ? "
       "GROUP BY t.category_id, c.name ORDER BY 2 DESC;");
   statement.bind(1, household_id).bind(2, from_time).bind(3, to_time);

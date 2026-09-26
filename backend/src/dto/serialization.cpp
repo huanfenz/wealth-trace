@@ -289,21 +289,15 @@ nlohmann::json to_json(const MaintenanceResult& result) {
           {"term_deposits", result.term_deposits}};
 }
 
-// 交易流水：amount 为分；category 分类可选；transfer_group_id 关联同一笔转账的
-// 两条流水；balance_before/after 为交易前后资产余额（分，可为空）；
-// transaction_time 为 UTC "YYYY-MM-DD HH:MM:SS"；status 为枚举名。
+// 业务交易基础信息；面向用户的交易语义由 TransactionDTO 输出。
 nlohmann::json to_json(const Transaction& transaction) {
   return {{"id", transaction.id},
           {"household_id", transaction.household_id},
           {"owner_member_id", transaction.owner_member_id},
-          {"asset_id", transaction.asset_id},
           {"type", std::string(to_string(transaction.type))},
           {"category_id", optional_int(transaction.category_id)},
           {"category", optional_text(transaction.category)},
-          {"amount", transaction.amount},
-          {"transfer_group_id", optional_int(transaction.transfer_group_id)},
-          {"balance_before", optional_int(transaction.balance_before)},
-          {"balance_after", optional_int(transaction.balance_after)},
+          {"action", transaction.action ? nlohmann::json(to_string(*transaction.action)) : nlohmann::json(nullptr)},
           {"transaction_time", transaction.transaction_time},
           {"remark", optional_text(transaction.remark)},
           {"status", std::string(to_string(transaction.status))},
@@ -311,9 +305,19 @@ nlohmann::json to_json(const Transaction& transaction) {
           {"updated_at", transaction.updated_at}};
 }
 
-// 转账结果：outgoing 转出流水、incoming 转入流水。
-nlohmann::json to_json(const TransferResult& result) {
-  return {{"outgoing", to_json(result.outgoing)}, {"incoming", to_json(result.incoming)}};
+nlohmann::json to_json(const TransactionEntry& e) {
+  return {{"id",e.id},{"transaction_id",e.transaction_id},{"owner_member_id",e.owner_member_id},
+          {"asset_id",e.asset_id},{"direction",std::string(to_string(e.direction))},{"amount",e.amount},
+          {"balance_before",optional_int(e.balance_before)},{"balance_after",optional_int(e.balance_after)}};
+}
+nlohmann::json to_json(const TransactionDTO& d) {
+  auto result=to_json(d.transaction);
+  result["title"]=d.title;result["subtitle"]=optional_text(d.subtitle);result["amount"]=d.amount;
+  result["direction"]=std::string(to_string(d.direction));
+  result["source_asset"]=d.source_asset_id?nlohmann::json{{"id",*d.source_asset_id},{"name",*d.source_asset_name}}:nlohmann::json(nullptr);
+  result["destination_asset"]=d.destination_asset_id?nlohmann::json{{"id",*d.destination_asset_id},{"name",*d.destination_asset_name}}:nlohmann::json(nullptr);
+  if(!d.entries.empty()){result["entries"]=nlohmann::json::array();for(const auto&e:d.entries)result["entries"].push_back(to_json(e));}
+  return result;
 }
 
 nlohmann::json to_json(const RecurringInvestmentPlan& p) {
@@ -327,7 +331,7 @@ nlohmann::json to_json(const RecurringInvestmentPlan& p) {
 nlohmann::json to_json(const RecurringInvestmentExecution& e) {
   return {{"id",e.id},{"plan_id",e.plan_id},{"scheduled_date",e.scheduled_date},{"amount",e.amount},
           {"source_asset_id",optional_int(e.source_asset_id)},{"target_asset_id",optional_int(e.target_asset_id)},
-          {"status",e.status},{"transfer_group_id",optional_int(e.transfer_group_id)},
+          {"status",e.status},{"transaction_id",optional_int(e.transaction_id)},
           {"failure_reason",optional_text(e.failure_reason)},{"created_at",e.created_at},{"updated_at",e.updated_at}};
 }
 

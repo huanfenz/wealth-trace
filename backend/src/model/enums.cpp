@@ -43,10 +43,15 @@ constexpr std::pair<std::string_view, AssetStatus> kAssetStatuses[] = {
 constexpr std::pair<std::string_view, TransactionType> kTransactionTypes[] = {
     {"INCOME", TransactionType::Income},
     {"EXPENSE", TransactionType::Expense},
-    {"TRANSFER_IN", TransactionType::TransferIn},
-    {"TRANSFER_OUT", TransactionType::TransferOut},
-    {"ADJUSTMENT", TransactionType::Adjustment},
-    {"ASSET_PURCHASE", TransactionType::AssetPurchase}};
+    {"TRANSFER", TransactionType::Transfer},
+    {"INVESTMENT", TransactionType::Investment},
+    {"ADJUSTMENT", TransactionType::Adjustment}};
+constexpr std::pair<std::string_view, TransactionDirection> kDirections[] = {
+    {"IN", TransactionDirection::In}, {"OUT", TransactionDirection::Out}};
+constexpr std::pair<std::string_view, InvestmentAction> kInvestmentActions[] = {
+    {"BUY", InvestmentAction::Buy}, {"REDEEM", InvestmentAction::Redeem},
+    {"DIVIDEND", InvestmentAction::Dividend}, {"INTEREST", InvestmentAction::Interest},
+    {"MATURITY", InvestmentAction::Maturity}, {"ROLL_OVER", InvestmentAction::RollOver}};
 constexpr std::pair<std::string_view, TransactionStatus> kTransactionStatuses[] = {
     {"NORMAL", TransactionStatus::Normal}, {"VOID", TransactionStatus::Void}};
 constexpr std::pair<std::string_view, TermUnit> kTermUnits[] = {
@@ -97,12 +102,33 @@ std::string_view to_string(TransactionType value) {
   switch (value) {
     case TransactionType::Income: return "INCOME";
     case TransactionType::Expense: return "EXPENSE";
-    case TransactionType::TransferIn: return "TRANSFER_IN";
-    case TransactionType::TransferOut: return "TRANSFER_OUT";
+    case TransactionType::Transfer: return "TRANSFER";
+    case TransactionType::Investment: return "INVESTMENT";
     case TransactionType::Adjustment: return "ADJUSTMENT";
-    case TransactionType::AssetPurchase: return "ASSET_PURCHASE";
   }
   return "ADJUSTMENT";
+}
+std::string_view to_string(TransactionDirection value) {
+  return value == TransactionDirection::In ? "IN" : "OUT";
+}
+std::string_view to_string(DisplayDirection value) {
+  switch (value) {
+    case DisplayDirection::In: return "IN";
+    case DisplayDirection::Out: return "OUT";
+    case DisplayDirection::Neutral: return "NEUTRAL";
+  }
+  return "NEUTRAL";
+}
+std::string_view to_string(InvestmentAction value) {
+  switch (value) {
+    case InvestmentAction::Buy: return "BUY";
+    case InvestmentAction::Redeem: return "REDEEM";
+    case InvestmentAction::Dividend: return "DIVIDEND";
+    case InvestmentAction::Interest: return "INTEREST";
+    case InvestmentAction::Maturity: return "MATURITY";
+    case InvestmentAction::RollOver: return "ROLL_OVER";
+  }
+  return "BUY";
 }
 std::string_view to_string(TransactionStatus value) {
   return value == TransactionStatus::Normal ? "NORMAL" : "VOID";
@@ -138,6 +164,12 @@ std::optional<AssetStatus> parse_asset_status(std::string_view text) {
 std::optional<TransactionType> parse_transaction_type(std::string_view text) {
   return parse_enum(text, kTransactionTypes, std::size(kTransactionTypes));
 }
+std::optional<TransactionDirection> parse_transaction_direction(std::string_view text) {
+  return parse_enum(text, kDirections, std::size(kDirections));
+}
+std::optional<InvestmentAction> parse_investment_action(std::string_view text) {
+  return parse_enum(text, kInvestmentActions, std::size(kInvestmentActions));
+}
 std::optional<TransactionStatus> parse_transaction_status(std::string_view text) {
   return parse_enum(text, kTransactionStatuses, std::size(kTransactionStatuses));
 }
@@ -148,19 +180,8 @@ std::optional<HoldingMode> parse_holding_mode(std::string_view text) {
   return parse_enum(text, kHoldingModes, std::size(kHoldingModes));
 }
 
-std::int64_t transaction_delta(TransactionType type, std::int64_t amount) {
-  // 符号规则：收入/转入/调账为增量，支出/转出为减量；调账的 amount 自身可为负。
-  switch (type) {
-    case TransactionType::Income:
-    case TransactionType::TransferIn:
-    case TransactionType::Adjustment:
-      return amount;
-    case TransactionType::Expense:
-    case TransactionType::TransferOut:
-    case TransactionType::AssetPurchase:
-      return -amount;
-  }
-  return 0;
+std::int64_t entry_delta(TransactionDirection direction, std::int64_t amount) {
+  return direction == TransactionDirection::In ? amount : -amount;
 }
 
 }  // namespace wt

@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <vector>
 
 #include "model/enums.hpp"
 
@@ -135,25 +136,47 @@ struct InsuranceDetail {
   std::optional<std::int64_t> payment_years;    // 缴费年限（可空）
 };
 
-// 交易流水：任何 Asset.current_balance 的变化都必须产生一条交易记录。
+// Transaction 表示用户认知中的一笔完整业务。
 struct Transaction {
   std::int64_t id = 0;              // 主键
   std::int64_t household_id = 0;    // 所属家庭。冗余字段：便于按家庭过滤/统计
-  std::int64_t owner_member_id = 0; // 所属成员。冗余自动从 Asset 取得，便于按成员过滤/统计
-  std::int64_t asset_id = 0;        // 关联资产
+  std::int64_t owner_member_id = 0; // 主要归属成员
   TransactionType type = TransactionType::Expense; // 交易类型
   std::optional<std::int64_t> category_id;         // 收支分类 id（可空）
   std::optional<std::string> category;             // 分类（可空）
-  std::int64_t amount = 0;          // 金额（分）：常规类型恒为正；ADJUSTMENT 时 amount 本身可为负
-  std::optional<std::int64_t> transfer_group_id;   // 转账组 id：一次转账拆成
-                                                   // TRANSFER_OUT/TRANSFER_IN 两条并共用同一值以便关联，非转账为空
-  std::optional<std::int64_t> balance_before;      // 交易前资产余额快照（分，可空）
-  std::optional<std::int64_t> balance_after;       // 交易后资产余额快照（分，可空）
+  std::optional<InvestmentAction> action;
   std::string transaction_time;     // 交易发生时间，UTC "YYYY-MM-DD HH:MM:SS"
   std::optional<std::string> remark; // 备注（可空）
   TransactionStatus status = TransactionStatus::Normal; // 状态：Normal=有效，Void=已作废
   std::string created_at;           // 创建时间，UTC "YYYY-MM-DD HH:MM:SS"
   std::string updated_at;           // 更新时间，UTC "YYYY-MM-DD HH:MM:SS"
+};
+
+// TransactionEntry 表示一笔交易对一项资产造成的价值变化。
+struct TransactionEntry {
+  std::int64_t id = 0;
+  std::int64_t transaction_id = 0;
+  std::int64_t household_id = 0;
+  std::int64_t owner_member_id = 0;
+  std::int64_t asset_id = 0;
+  TransactionDirection direction = TransactionDirection::In;
+  std::int64_t amount = 0;
+  std::optional<std::int64_t> balance_before;
+  std::optional<std::int64_t> balance_after;
+  std::string created_at;
+};
+
+struct TransactionDTO {
+  Transaction transaction;
+  std::int64_t amount = 0;
+  DisplayDirection direction = DisplayDirection::Neutral;
+  std::string title;
+  std::optional<std::string> subtitle;
+  std::optional<std::int64_t> source_asset_id;
+  std::optional<std::string> source_asset_name;
+  std::optional<std::int64_t> destination_asset_id;
+  std::optional<std::string> destination_asset_name;
+  std::vector<TransactionEntry> entries;
 };
 
 // 家庭维护的收支分类。

@@ -10,7 +10,7 @@ constexpr const char* kPlanColumns =
     "frequency, weekday, month_day, start_date, next_due_date, status, created_at, updated_at";
 constexpr const char* kExecutionColumns =
     "id, plan_id, scheduled_date, amount, source_asset_id, target_asset_id, status, "
-    "transfer_group_id, failure_reason, created_at, updated_at";
+    "transaction_id, failure_reason, created_at, updated_at";
 
 RecurringInvestmentPlan map_plan(Statement& s) {
   RecurringInvestmentPlan p;
@@ -28,7 +28,7 @@ RecurringInvestmentExecution map_execution(Statement& s) {
   e.id=s.get_int64(0); e.plan_id=s.get_int64(1); e.scheduled_date=s.get_text(2);
   e.amount=s.get_int64(3); e.source_asset_id=s.get_optional_int64(4);
   e.target_asset_id=s.get_optional_int64(5); e.status=s.get_text(6);
-  e.transfer_group_id=s.get_optional_int64(7); e.failure_reason=s.get_optional_text(8);
+  e.transaction_id=s.get_optional_int64(7); e.failure_reason=s.get_optional_text(8);
   e.created_at=s.get_text(9); e.updated_at=s.get_text(10);
   return e;
 }
@@ -86,9 +86,9 @@ bool RecurringInvestmentRepository::set_status(std::int64_t id,const std::string
   s.bind(1,status).bind(2,now).bind(3,id).run(); return database_.changes()>0;
 }
 std::int64_t RecurringInvestmentRepository::create_execution(const RecurringInvestmentExecution& e) {
-  Statement s(database_,"INSERT INTO recurring_investment_execution (plan_id,scheduled_date,amount,source_asset_id,target_asset_id,status,transfer_group_id,failure_reason,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?);");
+  Statement s(database_,"INSERT INTO recurring_investment_execution (plan_id,scheduled_date,amount,source_asset_id,target_asset_id,status,transaction_id,failure_reason,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?);");
   s.bind(1,e.plan_id).bind(2,e.scheduled_date).bind(3,e.amount).bind_optional_int64(4,e.source_asset_id)
-   .bind_optional_int64(5,e.target_asset_id).bind(6,e.status).bind_optional_int64(7,e.transfer_group_id)
+   .bind_optional_int64(5,e.target_asset_id).bind(6,e.status).bind_optional_int64(7,e.transaction_id)
    .bind_optional_text(8,e.failure_reason).bind(9,e.created_at).bind(10,e.updated_at).run(); return database_.last_insert_rowid();
 }
 std::optional<RecurringInvestmentExecution> RecurringInvestmentRepository::find_execution(std::int64_t id) {
@@ -104,12 +104,12 @@ std::vector<RecurringInvestmentExecution> RecurringInvestmentRepository::list_ex
   return out;
 }
 bool RecurringInvestmentRepository::update_execution(const RecurringInvestmentExecution& e) {
-  Statement s(database_,"UPDATE recurring_investment_execution SET status=?,transfer_group_id=?,failure_reason=?,updated_at=? WHERE id=?;");
-  s.bind(1,e.status).bind_optional_int64(2,e.transfer_group_id).bind_optional_text(3,e.failure_reason)
+  Statement s(database_,"UPDATE recurring_investment_execution SET status=?,transaction_id=?,failure_reason=?,updated_at=? WHERE id=?;");
+  s.bind(1,e.status).bind_optional_int64(2,e.transaction_id).bind_optional_text(3,e.failure_reason)
    .bind(4,e.updated_at).bind(5,e.id).run(); return database_.changes()>0;
 }
-bool RecurringInvestmentRepository::mark_reversed(std::int64_t group,const std::string& now) {
-  Statement s(database_,"UPDATE recurring_investment_execution SET status='REVERSED',updated_at=? WHERE transfer_group_id=? AND status='SUCCESS';");
-  s.bind(1,now).bind(2,group).run(); return database_.changes()>0;
+bool RecurringInvestmentRepository::mark_reversed(std::int64_t transaction,const std::string& now) {
+  Statement s(database_,"UPDATE recurring_investment_execution SET status='REVERSED',updated_at=? WHERE transaction_id=? AND status='SUCCESS';");
+  s.bind(1,now).bind(2,transaction).run(); return database_.changes()>0;
 }
 }  // namespace wt

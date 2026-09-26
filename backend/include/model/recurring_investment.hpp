@@ -31,7 +31,7 @@ struct RecurringInvestmentExecution {
   std::optional<std::int64_t> source_asset_id;
   std::optional<std::int64_t> target_asset_id;
   std::string status;
-  std::optional<std::int64_t> transfer_group_id;
+  std::optional<std::int64_t> transaction_id;
   std::optional<std::string> failure_reason;
   std::string created_at;
   std::string updated_at;

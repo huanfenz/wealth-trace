@@ -47,8 +47,8 @@ nlohmann::json to_json(const MaintenancePlan& plan);
 nlohmann::json to_json(const MaintenanceResult& result);
 // 交易流水（金额为分，收支方向由 type 决定；时间 UTC 字符串）。
 nlohmann::json to_json(const Transaction& transaction);
-// 转账结果：同时返回转出与转入两条流水。
-nlohmann::json to_json(const TransferResult& result);
+nlohmann::json to_json(const TransactionEntry& entry);
+nlohmann::json to_json(const TransactionDTO& transaction);
 nlohmann::json to_json(const RecurringInvestmentPlan& plan);
 nlohmann::json to_json(const RecurringInvestmentExecution& execution);
 

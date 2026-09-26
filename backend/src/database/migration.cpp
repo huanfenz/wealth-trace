@@ -49,6 +49,94 @@ bool parse_version(const std::string& filename, std::int64_t& version) {
   return true;
 }
 
+void preflight_transaction_entries(Database& database) {
+  std::vector<std::string> issues;
+  {
+    Statement s(database,
+      "SELECT transfer_group_id,group_concat(id),COUNT(*),"
+      "SUM(CASE WHEN type='TRANSFER_OUT' THEN 1 ELSE 0 END),"
+      "SUM(CASE WHEN type='TRANSFER_IN' THEN 1 ELSE 0 END),"
+      "MIN(amount),MAX(amount),COUNT(DISTINCT household_id) "
+      "FROM \"transaction\" WHERE transfer_group_id IS NOT NULL "
+      "GROUP BY transfer_group_id HAVING COUNT(*)<>2 OR "
+      "SUM(CASE WHEN type='TRANSFER_OUT' THEN 1 ELSE 0 END)<>1 OR "
+      "SUM(CASE WHEN type='TRANSFER_IN' THEN 1 ELSE 0 END)<>1 OR "
+      "MIN(amount)<>MAX(amount) OR COUNT(DISTINCT household_id)<>1;");
+    while(s.step()) issues.push_back("transfer group "+std::to_string(s.get_int64(0))+" rows ["+s.get_text(1)+"]");
+  }
+  {
+    Statement s(database,"SELECT id,type FROM \"transaction\" WHERE "
+      "(type IN ('TRANSFER_IN','TRANSFER_OUT') AND transfer_group_id IS NULL) OR "
+      "(type IN ('INCOME','EXPENSE','TRANSFER_IN','TRANSFER_OUT','ASSET_PURCHASE') AND amount<=0) OR "
+      "(type='ADJUSTMENT' AND amount=0) ORDER BY id;");
+    while(s.step())issues.push_back("transaction "+std::to_string(s.get_int64(0))+" has invalid amount or missing transfer group ("+s.get_text(1)+")");
+  }
+  {
+    Statement s(database,"SELECT id,remark FROM \"transaction\" WHERE type='ASSET_PURCHASE';");
+    while (s.step()) {
+      const auto remark=s.get_optional_text(1);
+      const auto marker=remark ? remark->find("(#") : std::string::npos;
+      bool valid=remark && marker!=std::string::npos && remark->back()==')' &&
+                 marker+3<=remark->size()-1;
+      if(valid) {
+        for(auto i=marker+2;i+1<remark->size();++i) {
+          if((*remark)[i]<'0'||(*remark)[i]>'9') {valid=false;break;}
+        }
+      }
+      if(valid) {
+        try {valid=std::stoll(remark->substr(marker+2,remark->size()-marker-3))>0;}
+        catch(const std::exception&) {valid=false;}
+      }
+      if(!valid) issues.push_back("asset purchase transaction "+std::to_string(s.get_int64(0))+" has an ambiguous or malformed target marker");
+    }
+  }
+  {
+    const std::string target = "CAST(substr(substr(t.remark,instr(t.remark,'(#')+2),1,instr(substr(t.remark,instr(t.remark,'(#')+2),')')-1) AS INTEGER)";
+    Statement s(database,"SELECT t.id FROM \"transaction\" t LEFT JOIN asset a ON a.id="+target+
+      " AND a.household_id=t.household_id WHERE t.type='ASSET_PURCHASE' AND "
+      "(t.remark IS NULL OR instr(t.remark,'(#')=0 OR a.id IS NULL OR "
+      "(SELECT opening_balance FROM asset WHERE id=a.id)<t.amount);");
+    while(s.step()) issues.push_back("asset purchase transaction "+std::to_string(s.get_int64(0))+" has no safe target asset");
+  }
+  {
+    const std::string target = "CAST(substr(substr(t.remark,instr(t.remark,'(#')+2),1,instr(substr(t.remark,instr(t.remark,'(#')+2),')')-1) AS INTEGER)";
+    Statement s(database,"SELECT group_concat(t.id),a.id FROM \"transaction\" t JOIN asset a ON a.id="+target+
+      " WHERE t.type='ASSET_PURCHASE' GROUP BY a.id HAVING SUM(t.amount)>MAX(a.opening_balance);");
+    while(s.step()) issues.push_back("asset purchases ["+s.get_text(0)+"] exceed target asset "+std::to_string(s.get_int64(1))+" opening balance");
+  }
+  {
+    Statement s(database,
+      "SELECT e.id,e.transfer_group_id FROM recurring_investment_execution e "
+      "WHERE e.status IN ('SUCCESS','REVERSED') AND e.transfer_group_id IS NOT NULL AND "
+      "(SELECT COUNT(*) FROM \"transaction\" t WHERE t.transfer_group_id=e.transfer_group_id)<>2 "
+      "ORDER BY e.id;");
+    while(s.step()) issues.push_back("investment execution "+std::to_string(s.get_int64(0))+" references incomplete transfer group "+std::to_string(s.get_int64(1)));
+  }
+  {
+    Statement s(database,
+      "SELECT e.id,e.transfer_group_id FROM recurring_investment_execution e "
+      "JOIN \"transaction\" o ON o.transfer_group_id=e.transfer_group_id AND o.type='TRANSFER_OUT' "
+      "JOIN \"transaction\" i ON i.transfer_group_id=e.transfer_group_id AND i.type='TRANSFER_IN' "
+      "WHERE e.status IN ('SUCCESS','REVERSED') AND e.transfer_group_id IS NOT NULL AND "
+      "(e.source_asset_id IS NULL OR e.target_asset_id IS NULL OR e.amount IS NULL OR "
+      "e.source_asset_id<>o.asset_id OR e.target_asset_id<>i.asset_id OR e.amount<>o.amount OR e.amount<>i.amount) "
+      "ORDER BY e.id;");
+    while(s.step()) issues.push_back("investment execution "+std::to_string(s.get_int64(0))+" does not match transfer group "+std::to_string(s.get_int64(1)));
+  }
+  {
+    Statement s(database,"SELECT transfer_group_id,group_concat(id) FROM recurring_investment_execution "
+      "WHERE status IN ('SUCCESS','REVERSED') AND transfer_group_id IS NOT NULL "
+      "GROUP BY transfer_group_id HAVING COUNT(*)>1;");
+    while(s.step()) issues.push_back("transfer group "+std::to_string(s.get_int64(0))+" is linked to multiple investment executions ["+s.get_text(1)+"]");
+  }
+  if(!issues.empty()) {
+    std::ostringstream message;
+    message << "transaction entry migration preflight failed; repair these records first:";
+    for(const auto& issue:issues) message << "\n - " << issue;
+    throw std::runtime_error(message.str());
+  }
+}
+
 // 以二进制方式整体读取文件（保留原始字节，包括可能的 BOM 与换行）。
 std::string read_file(const std::filesystem::path& path) {
   std::ifstream input(path, std::ios::binary);
@@ -145,6 +233,9 @@ std::vector<std::int64_t> MigrationRunner::run(const std::string& migrations_dir
   for (const auto& migration : migrations) {
     if (migration.version <= start_version) {
       continue;
+    }
+    if (migration.version == 13) {
+      preflight_transaction_entries(database_);
     }
     log_info("applying migration " + migration.name);
     const std::string sql = read_file(migration.path);
