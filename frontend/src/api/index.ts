@@ -293,15 +293,17 @@ export function transfer(
   householdId: number,
   body: Record<string, unknown>,
 ): Promise<{ outgoing: Transaction; incoming: Transaction }> {
-  return post<{ outgoing: Transaction; incoming: Transaction }>(
-    `/households/${householdId}/transfers`,
-    body,
-  )
+  return post<{ outgoing: Transaction; incoming: Transaction }>(`/households/${householdId}/transfers`, body)
 }
 
-/** 删除流水并回滚资产余额；转账流水会同组删除配对的两条。 */
-export function deleteTransaction(id: number): Promise<{ deleted: number }> {
-  return del<{ deleted: number }>(`/transactions/${id}`)
+/** 删除流水；可选择是否回滚资产余额，转账流水始终成对删除。 */
+export function deleteTransaction(id: number, rollbackAssets = true): Promise<{ deleted: number }> {
+  return del<{ deleted: number }>(`/transactions/${id}?rollback_assets=${rollbackAssets}`)
+}
+
+/** 修改收入或支出流水的分类；null 表示清空分类。 */
+export function updateTransactionCategory(id: number, categoryId: number | null): Promise<Transaction> {
+  return put<Transaction>(`/transactions/${id}/category`, { category_id: categoryId })
 }
 
 // --- statistics（统计） ---------------------------------------------------

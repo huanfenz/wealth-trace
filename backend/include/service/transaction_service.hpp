@@ -26,9 +26,8 @@ struct TransferResult {
 
 // 交易服务：一条 Transaction 只影响一个资产、只属于一个成员（属主取自资产）。
 // amount 一律存正数绝对值，余额方向由 type 决定（ADJUSTMENT 例外，可正可负）。
-// 每次 current_balance 变化都必然写入一条流水，并保持
-// current_balance = opening_balance + Σdelta。
-// 写流水与改余额总在同一事务内，避免「改了余额没记账」或相反。
+// 记账时的 current_balance 变化会写入流水；删除流水时可选择保留余额。
+// 写入流水与改余额在同一事务内完成。
 class TransactionService {
  public:
   explicit TransactionService(Database& database)
@@ -73,16 +72,17 @@ class TransactionService {
 
   // 分页查询流水；过滤条件由 TransactionQuery 给出。
   std::vector<Transaction> list(const TransactionQuery& query);
-  // 统计满足条件的流水条数（分页总数用）。
+  // 统计满足条件的流水条数。
   std::int64_t count(const TransactionQuery& query);
   // 按 id 获取流水；不存在抛 not_found。
   Transaction get(std::int64_t id);
+  // 仅修改收入/支出分类；nullopt 清空分类。分类须同家庭、同类型且启用。
+  Transaction update_category(std::int64_t id, std::optional<std::int64_t> category_id);
 
-  // 删除流水并回滚其对资产余额的影响（current_balance -= 原 delta）。
-  // 若该流水属于某次转账（transfer_group_id 非空），则连同同组的两条流水
-  // 一起删除，并分别回滚两端资产余额，保证「钱不会凭空增减」。
-  // 流水不存在抛 not_found。返回实际删除的流水条数（转账为 2，否则为 1）。
-  std::int64_t remove(std::int64_t id);
+  // 删除流水；rollback_assets 为 true 时回滚其对资产余额的影响。
+  // 若该流水属于某次转账，则始终删除同组流水；回滚时分别调整各端余额。
+  // 流水不存在抛 not_found。返回实际删除的底层流水条数（转账为 2，否则为 1）。
+  std::int64_t remove(std::int64_t id, bool rollback_assets = true);
 
  private:
   // 单资产流水的公共实现：校验金额方向，检查资产 ACTIVE，计算 delta 与

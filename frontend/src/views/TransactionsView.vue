@@ -2,8 +2,8 @@
 <template>
   <div>
     <div class="toolbar">
-      <el-button type="success" :icon="Plus" @click="openDialog('income')">记收入</el-button>
       <el-button type="warning" :icon="Minus" @click="openDialog('expense')">记支出</el-button>
+      <el-button type="success" :icon="Plus" @click="openDialog('income')">记收入</el-button>
       <el-button type="primary" :icon="Sort" @click="openDialog('transfer')">转账</el-button>
       <el-button :icon="Edit" @click="openDialog('adjustment')">余额调整</el-button>
     </div>
@@ -31,7 +31,7 @@
     <el-card shadow="never">
       <el-table :data="transactions" v-loading="loading" @selection-change="selectedTransactions = $event">
         <el-table-column type="selection" width="48" />
-        <el-table-column prop="transaction_time" label="时间" width="170" />
+        <el-table-column prop="transaction_time" label="时间" width="150" />
         <el-table-column label="成员" width="110">
           <template #default="{ row }">{{ store.memberName(row.owner_member_id) }}</template>
         </el-table-column>
@@ -40,10 +40,7 @@
         </el-table-column>
         <el-table-column label="类型" width="110">
           <template #default="{ row }">
-            <el-tag
-              size="small"
-              :type="row.transfer_group_id !== null ? 'primary' : tagType(row.type)"
-            >
+            <el-tag size="small" :type="row.transfer_group_id !== null ? 'primary' : tagType(row.type)">
               {{ typeLabel(row) }}
             </el-tag>
           </template>
@@ -60,8 +57,9 @@
           </template>
         </el-table-column>
         <el-table-column prop="remark" label="备注" show-overflow-tooltip />
-        <el-table-column label="操作" width="80" align="right">
+        <el-table-column label="操作" width="110" align="right">
           <template #default="{ row }">
+            <el-button v-if="row.type === 'INCOME' || row.type === 'EXPENSE'" link type="primary" @click="openCategoryEditor(row)">编辑</el-button>
             <el-button link type="danger" @click="remove(row)">删除</el-button>
           </template>
         </el-table-column>
@@ -120,13 +118,58 @@
         <el-button type="primary" :loading="saving" @click="submit">提交</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog v-model="editDialogVisible" title="编辑交易分类" width="420px" :close-on-click-modal="false">
+      <el-form label-width="70px">
+        <el-form-item label="分类">
+          <el-select v-model="editCategoryId" clearable :value-on-clear="null" filterable placeholder="未分类" style="width: 100%">
+            <el-option
+              v-if="unavailableCategory"
+              :label="unavailableCategory.label"
+              :value="unavailableCategory.id"
+              disabled
+            />
+            <el-option v-for="category in editCategories" :key="category.id" :label="category.name" :value="category.id" />
+          </el-select>
+        </el-form-item>
+      </el-form>
+      <p v-if="editingTransaction?.category_id === null && editingTransaction.category" class="edit-hint">
+        原分类“{{ editingTransaction.category }}”来自旧记录，请选择现有分类或清空。
+      </p>
+      <p v-if="unavailableCategory" class="edit-hint">原分类已停用，请选择可用分类或清空。</p>
+      <template #footer>
+        <el-button :disabled="editSaving" @click="editDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="editSaving" :disabled="!canSaveCategory" @click="saveCategory">保存</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog
+      v-model="deleteDialogVisible"
+      title="删除交易记录"
+      width="480px"
+      :close-on-click-modal="false"
+      :close-on-press-escape="!deleting"
+      :show-close="!deleting"
+    >
+      <p>将删除{{ deleteTargets.length === 1 ? '这条' : `选中的 ${deleteTargets.length} 条` }}交易记录。</p>
+      <p v-if="deleteHasTransfer">选中记录包含转账，配对的转出和转入记录会一起删除。</p>
+      <el-radio-group v-model="deleteMode" class="delete-options">
+        <el-radio value="records">仅删除交易记录（资产余额保持不变）</el-radio>
+        <el-radio value="rollback">删除交易记录并回滚资产余额</el-radio>
+      </el-radio-group>
+      <p class="delete-hint">仅删除记录后，流水合计可能与资产余额不一致。删除后无法恢复。</p>
+      <template #footer>
+        <el-button :disabled="deleting" @click="deleteDialogVisible = false">取消</el-button>
+        <el-button type="danger" :loading="deleting" :disabled="!deleteMode" @click="confirmDelete">确认删除</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
 // 职责：展示/新增交易流水；同一弹窗按 kind 复用为收入、支出、转账、调整四种表单并分派到对应接口。
 import { computed, onMounted, reactive, ref } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
 import { Edit, Minus, Plus, Sort } from '@element-plus/icons-vue'
 
 import AmountText from '@/components/AmountText.vue'
@@ -137,6 +180,7 @@ import {
   recordExpense,
   recordIncome,
   transfer,
+  updateTransactionCategory,
 } from '@/api'
 import { useAppStore } from '@/stores/app'
 import { transactionTypeLabels } from '@/utils/labels'
@@ -144,6 +188,7 @@ import { formatMoney, toMinor } from '@/utils/money'
 import type { Transaction, TransactionType } from '@/types'
 
 type DialogKind = 'income' | 'expense' | 'transfer' | 'adjustment' // 弹窗形态
+type DeleteMode = 'records' | 'rollback'
 
 const store = useAppStore()
 const transactions = ref<Transaction[]>([]) // 当前页流水
@@ -157,9 +202,30 @@ const pageSize = 20                         // 每页条数
 const filterMember = ref<number | undefined>(undefined) // 按成员筛选
 const filterAsset = ref<number | undefined>(undefined)  // 按资产筛选
 const filterType = ref<string | undefined>(undefined)   // 按交易类型筛选
-
 const dialogVisible = ref(false)      // 弹窗显隐
 const kind = ref<DialogKind>('income') // 当前弹窗形态
+const deleteDialogVisible = ref(false)
+const deleteTargets = ref<Transaction[]>([])
+const deleteMode = ref<DeleteMode | null>(null)
+const deleting = ref(false)
+const deleteHasTransfer = computed(() => deleteTargets.value.some((item) => item.transfer_group_id !== null))
+const editDialogVisible = ref(false)
+const editingTransaction = ref<Transaction | null>(null)
+const editCategoryId = ref<number | null>(null)
+const editSaving = ref(false)
+const editCategories = computed(() =>
+  editingTransaction.value?.type === 'INCOME' ? store.incomeCategories : store.expenseCategories,
+)
+const unavailableCategory = computed(() => {
+  const transaction = editingTransaction.value
+  if (transaction?.category_id === null || !transaction) return null
+  if (editCategories.value.some((category) => category.id === transaction.category_id)) return null
+  return { id: transaction.category_id, label: `${transaction.category ?? `#${transaction.category_id}`}（已停用）` }
+})
+const canSaveCategory = computed(() =>
+  !!editingTransaction.value && !editSaving.value &&
+  (editCategoryId.value === null || editCategories.value.some((category) => category.id === editCategoryId.value)),
+)
 
 // 各形态对应的弹窗标题。
 const dialogTitles: Record<DialogKind, string> = {
@@ -344,52 +410,77 @@ onMounted(async () => {
   await load()
 })
 
-// 删除流水：删除后后端会回滚资产余额；若为转账则成对删除两条，删除前明确提示。
-async function remove(transaction: Transaction) {
-  const isTransfer = transaction.transfer_group_id !== null
-  const detail = isTransfer
-    ? '该记录属于一次转账，删除后将同时删除与之配对的两条转账记录，并回滚两端资产余额。'
-    : '删除后将回滚该资产余额。'
+function openCategoryEditor(transaction: Transaction) {
+  editingTransaction.value = transaction
+  editCategoryId.value = transaction.category_id
+  editDialogVisible.value = true
+}
+
+async function saveCategory() {
+  if (!canSaveCategory.value || !editingTransaction.value) return
+  editSaving.value = true
   try {
-    await ElMessageBox.confirm(`${detail}此操作不可恢复，确认删除？`, '确认删除', {
-      type: 'warning',
-      confirmButtonText: '确认删除',
-      cancelButtonText: '取消',
-      confirmButtonClass: 'el-button--danger',
-    })
-  } catch {
-    return
-  }
-  try {
-    await deleteTransaction(transaction.id)
-    await Promise.all([load(), store.refreshAssets()])
-    ElMessage.success('已删除')
+    await updateTransactionCategory(editingTransaction.value.id, editCategoryId.value)
+    editDialogVisible.value = false
+    await load()
+    ElMessage.success('分类已更新')
   } catch (error) {
     ElMessage.error((error as Error).message)
+  } finally {
+    editSaving.value = false
   }
 }
 
-async function bulkRemove() {
-  const targets = selectedTransactions.value
-  if (!targets.length) return
-  try {
-    await ElMessageBox.confirm(
-      `确认删除选中的 ${targets.length} 条流水？删除转账记录时会同时删除配对流水，并回滚相关资产余额。此操作不可恢复。`,
-      '批量删除流水',
-      { type: 'warning', confirmButtonText: '确认删除', cancelButtonText: '取消', confirmButtonClass: 'el-button--danger' },
-    )
-  } catch { return }
+function remove(transaction: Transaction) {
+  deleteTargets.value = [transaction]
+  deleteMode.value = null
+  deleteDialogVisible.value = true
+}
+
+function bulkRemove() {
+  if (!selectedTransactions.value.length) return
+  deleteTargets.value = [...selectedTransactions.value]
+  deleteMode.value = null
+  deleteDialogVisible.value = true
+}
+
+async function confirmDelete() {
+  if (!deleteMode.value || deleting.value) return
   const seenGroups = new Set<number>()
-  const operations = targets.filter((transaction) => {
+  const operations = deleteTargets.value.filter((transaction) => {
     if (transaction.transfer_group_id === null) return true
     if (seenGroups.has(transaction.transfer_group_id)) return false
     seenGroups.add(transaction.transfer_group_id)
     return true
   })
-  const results = await Promise.allSettled(operations.map((transaction) => deleteTransaction(transaction.id)))
-  await Promise.all([load(), store.refreshAssets()])
-  const failed = results.filter((result) => result.status === 'rejected').length
-  ElMessage[failed ? 'warning' : 'success'](`批量删除完成：成功 ${operations.length - failed} 项，失败 ${failed} 项`)
+  deleting.value = true
+  try {
+    const results = await Promise.allSettled(
+      operations.map((transaction) => deleteTransaction(transaction.id, deleteMode.value === 'rollback')),
+    )
+    await Promise.all([load(), store.refreshAssets()])
+    if (transactions.value.length === 0 && page.value > 1) {
+      page.value = Math.min(page.value - 1, Math.max(1, Math.ceil(total.value / pageSize)))
+      await load()
+    }
+    const failures = results.filter((result) => result.status === 'rejected')
+    if (operations.length === 1 && failures.length) {
+      ElMessage.error((failures[0] as PromiseRejectedResult).reason.message)
+      return
+    }
+    deleteDialogVisible.value = false
+    if (operations.length === 1) {
+      ElMessage.success('已删除')
+    } else {
+      ElMessage[failures.length ? 'warning' : 'success'](
+        `批量删除完成：成功 ${operations.length - failures.length} 项，失败 ${failures.length} 项`,
+      )
+    }
+  } catch (error) {
+    ElMessage.error((error as Error).message)
+  } finally {
+    deleting.value = false
+  }
 }
 </script>
 
@@ -400,4 +491,7 @@ async function bulkRemove() {
   justify-content: flex-end;
 }
 .selection-count { color: #909399; font-size: 13px; }
+.delete-options { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; margin: 8px 0; }
+.delete-hint { color: #909399; font-size: 13px; }
+.edit-hint { color: #909399; font-size: 13px; }
 </style>

@@ -132,6 +132,20 @@ std::optional<Transaction> TransactionRepository::find_by_id(std::int64_t id) {
   return map_transaction(statement);
 }
 
+bool TransactionRepository::update_category(
+    std::int64_t id, std::optional<std::int64_t> category_id,
+    const std::optional<std::string>& category, const std::string& updated_at) {
+  Statement statement(database_,
+                      "UPDATE \"transaction\" SET category_id = ?, category = ?, "
+                      "updated_at = ? WHERE id = ?;");
+  statement.bind_optional_int64(1, category_id)
+      .bind_optional_text(2, category)
+      .bind(3, updated_at)
+      .bind(4, id)
+      .run();
+  return database_.changes() > 0;
+}
+
 // 按转账分组查询配对流水，按 id 升序（转出行先创建，通常排在前）。
 std::vector<Transaction> TransactionRepository::list_by_transfer_group(
     std::int64_t group_id) {

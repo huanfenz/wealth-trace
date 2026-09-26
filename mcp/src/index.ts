@@ -239,7 +239,8 @@ function createServer() {
     return api(`/households/${household_id}/transfers`, 'POST', body);
   });
   registerTool(server, 'get_transaction', { description: '读取单条交易流水。', inputSchema: entityId, readOnly: true }, (v) => api(`/transactions/${v.id}`));
-  registerTool(server, 'delete_transaction', { description: '删除流水并回滚余额；转账会成对删除。', inputSchema: entityId, destructive: true }, (v) => api(`/transactions/${v.id}`, 'DELETE'));
+  registerTool(server, 'set_transaction_category', { description: '修改收入或支出流水的分类；category_id 为 null 时清空分类。', inputSchema: entityId.extend({ category_id: id.nullable() }) }, (v) => api(`/transactions/${v.id}/category`, 'PUT', { category_id: v.category_id }));
+  registerTool(server, 'delete_transaction', { description: '删除流水；rollback_assets 默认 true，为 false 时保留资产余额。转账配对的两条底层流水会一并删除。', inputSchema: entityId.extend({ rollback_assets: z.boolean().optional() }), destructive: true }, (v) => api(`/transactions/${v.id}${v.rollback_assets === undefined ? '' : `?rollback_assets=${v.rollback_assets}`}`, 'DELETE'));
 
   // Statistics, maintenance and recurring investments.
   registerTool(server, 'get_overview', { description: '读取家庭总资产、负债、净资产和当月收支。', inputSchema: householdId.extend({ year: z.number().int().optional(), month: z.number().int().min(1).max(12).optional() }), readOnly: true }, (v) => {

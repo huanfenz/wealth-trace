@@ -137,11 +137,27 @@ void TransactionController::register_routes(crow::SimpleApp& app) {
     return http::handle([this, id] { return dto::to_json(service_.get(id)); });
   });
 
-  // DELETE /api/transactions/<int>：删除流水并回滚资产余额；流水不存在抛 404。
-  // 若为转账流水，会同组删除配对的两条，返回 {"deleted": 2}，否则 {"deleted": 1}。
-  CROW_ROUTE(app, "/api/transactions/<int>").methods("DELETE"_method)([this](int id) {
-    return http::handle([this, id] {
-      return nlohmann::json{{"deleted", service_.remove(id)}};
+  // PUT /api/transactions/<int>/category：仅修改收入/支出分类；null 清空分类。
+  CROW_ROUTE(app, "/api/transactions/<int>/category").methods("PUT"_method)(
+      [this](const crow::request& request, int id) {
+        return http::handle([this, &request, id] {
+          const auto body = dto::parse_object(request.body);
+          if (!body.contains("category_id")) {
+            throw invalid_request("category_id is required");
+          }
+          return dto::to_json(service_.update_category(id, body_category_id(body)));
+        });
+      });
+
+  // DELETE /api/transactions/<int>：可用 rollback_assets=false 仅删除流水；默认回滚余额。
+  // 若为转账流水，会同组删除配对的两条底层流水并返回实际删除条数。
+  CROW_ROUTE(app, "/api/transactions/<int>").methods("DELETE"_method)([this](const crow::request& request, int id) {
+    return http::handle([this, &request, id] {
+      const auto rollback = http::query_string(request, "rollback_assets");
+      if (rollback.has_value() && *rollback != "true" && *rollback != "false") {
+        throw invalid_request("rollback_assets must be true or false");
+      }
+      return nlohmann::json{{"deleted", service_.remove(id, !rollback.has_value() || *rollback == "true")}};
     });
   });
 }

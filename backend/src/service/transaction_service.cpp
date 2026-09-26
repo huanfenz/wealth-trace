@@ -1,6 +1,7 @@
 // 交易服务实现：单资产流水与转账的记账，负责余额增量、事务边界与一致性校验。
 #include "service/transaction_service.hpp"
 
+#include <algorithm>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -306,7 +307,39 @@ Transaction TransactionService::get(std::int64_t id) {
   return *transaction;
 }
 
-std::int64_t TransactionService::remove(std::int64_t id) {
+Transaction TransactionService::update_category(
+    std::int64_t id, std::optional<std::int64_t> category_id) {
+  std::scoped_lock lock(database_.mutex());
+  const auto target = transactions_.find_by_id(id);
+  if (!target.has_value()) {
+    throw not_found("transaction not found");
+  }
+  if (target->type != TransactionType::Income && target->type != TransactionType::Expense) {
+    throw invalid_request("only income and expense transactions can have categories");
+  }
+
+  std::optional<std::string> category;
+  if (category_id.has_value()) {
+    Statement row(database_,
+                  "SELECT name, household_id, type, active FROM transaction_category WHERE id = ?;");
+    row.bind(1, *category_id);
+    if (!row.step()) throw not_found("category not found");
+    if (row.get_int64(1) != target->household_id ||
+        row.get_text(2) != to_string(target->type)) {
+      throw invalid_request("category does not match household and transaction type");
+    }
+    if (row.get_int64(3) == 0) throw conflict("category is inactive");
+    category = row.get_text(0);
+  }
+
+  TransactionGuard guard(database_);
+  transactions_.update_category(id, category_id, category, time_util::now_iso8601());
+  const auto updated = transactions_.find_by_id(id);
+  guard.commit();
+  return *updated;
+}
+
+std::int64_t TransactionService::remove(std::int64_t id, bool rollback_assets) {
   std::scoped_lock lock(database_.mutex());
   const auto target = transactions_.find_by_id(id);
   if (!target.has_value()) {
@@ -314,26 +347,33 @@ std::int64_t TransactionService::remove(std::int64_t id) {
   }
 
   // 转账是一对共用 transfer_group_id 的流水：删除其中一条时必须成对删除，
-  // 否则会剩下一条「无对手方」的流水，且两端余额不再守恒。
+  // 否则会剩下一条「无对手方」的流水。
   std::vector<Transaction> to_delete;
   if (target->transfer_group_id.has_value()) {
     to_delete = transactions_.list_by_transfer_group(*target->transfer_group_id);
+    if (std::any_of(to_delete.begin(), to_delete.end(), [&](const Transaction& transaction) {
+          return transaction.household_id != target->household_id;
+        })) {
+      throw conflict("transfer group contains transactions from another household");
+    }
   } else {
     to_delete.push_back(*target);
   }
 
   const std::string now = time_util::now_iso8601();
-  // 逐条回滚余额并删除流水，全部放在一个事务里：要么都成功，要么都回滚。
+  // 余额调整与流水删除在同一事务里完成。
   TransactionGuard guard(database_);
-  if (target->transfer_group_id.has_value()) {
+  if (rollback_assets && target->transfer_group_id.has_value()) {
     investments_.mark_reversed(*target->transfer_group_id, now);
   }
   for (const auto& transaction : to_delete) {
-    const auto asset = assets_.find_by_id(transaction.asset_id);
-    if (asset.has_value()) {
-      // 反向操作：原交易使余额变化了 delta，删除即抵消该 delta。
-      const std::int64_t delta = transaction_delta(transaction.type, transaction.amount);
-      assets_.update_balance(asset->id, asset->current_balance - delta, now);
+    if (rollback_assets) {
+      const auto asset = assets_.find_by_id(transaction.asset_id);
+      if (asset.has_value()) {
+        // 反向操作：原交易使余额变化了 delta，删除即抵消该 delta。
+        const std::int64_t delta = transaction_delta(transaction.type, transaction.amount);
+        assets_.update_balance(asset->id, asset->current_balance - delta, now);
+      }
     }
     transactions_.remove(transaction.id);
   }

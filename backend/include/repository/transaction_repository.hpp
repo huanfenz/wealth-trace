@@ -34,6 +34,9 @@ class TransactionRepository {
   std::int64_t create(const Transaction& transaction);
   // 按主键查询，不存在返回 std::nullopt。
   std::optional<Transaction> find_by_id(std::int64_t id);
+  // 更新收支分类 id 与名称快照，不修改金额或资产余额。
+  bool update_category(std::int64_t id, std::optional<std::int64_t> category_id,
+                       const std::optional<std::string>& category, const std::string& updated_at);
   // 按转账分组 id 查询配对流水（通常两条：TRANSFER_OUT + TRANSFER_IN）。
   std::vector<Transaction> list_by_transfer_group(std::int64_t group_id);
   // 按主键删除流水；返回是否真正删除了行。

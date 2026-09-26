@@ -63,7 +63,7 @@
     "account_types": ["BANK", "ALIPAY", "WECHAT", "CASH", "SECURITIES", "INSURANCE", "OTHER"],
     "asset_types": ["CASH", "TERM_DEPOSIT", "STOCK_FUND", "BOND_FUND", "FLEXIBLE_TERM", "COMMERCIAL_PENSION", "INSURANCE", "LIABILITY", "OTHER"],
     "asset_statuses": ["ACTIVE", "CLOSED"],
-    "transaction_types": ["INCOME", "EXPENSE", "TRANSFER_IN", "TRANSFER_OUT", "ADJUSTMENT"],
+    "transaction_types": ["INCOME", "EXPENSE", "TRANSFER_IN", "TRANSFER_OUT", "ADJUSTMENT", "ASSET_PURCHASE"],
     "term_units": ["DAY", "MONTH", "YEAR"],
     "income_categories": ["工资", "奖金", "..."],
     "expense_categories": ["餐饮", "交通", "..."],
@@ -452,7 +452,7 @@
 | --- | --- |
 | `owner_member_id` | 按成员过滤 |
 | `asset_id` | 按资产过滤 |
-| `type` | INCOME/EXPENSE/TRANSFER_IN/TRANSFER_OUT/ADJUSTMENT |
+| `type` | INCOME/EXPENSE/TRANSFER_IN/TRANSFER_OUT/ADJUSTMENT/ASSET_PURCHASE |
 | `from` / `to` | 时间范围（`YYYY-MM-DD HH:MM:SS`，含端点） |
 | `limit` | 1..1000，默认 200 |
 | `offset` | 默认 0 |
@@ -460,8 +460,10 @@
 返回：
 
 ```json
-{ "total": 4, "items": [ { "id": 1, "type": "INCOME", "amount": 1000000, "...": "..." } ] }
+{ "total": 2, "items": [ { "id": 1, "type": "TRANSFER_OUT", "amount": 500000, "asset_id": 10, "transfer_group_id": 10001 } ] }
 ```
+
+每一条底层流水单独计数和分页。转账在结果中分别返回转出与转入两条流水。
 
 ### `POST /api/households/{id}/transactions/income`
 
@@ -510,11 +512,18 @@
 
 返回单条流水。
 
+### `PUT /api/transactions/{id}/category`
+
+只修改收入或支出流水的分类，返回更新后的流水。请求体为 `{"category_id": 1}`；
+传入 `null` 可清空分类。分类必须启用，且属于同一家庭及相同的收支类型。
+金额和资产余额不变；转账、余额调整及其他类型流水不能通过此接口修改分类。
+
 ### `DELETE /api/transactions/{id}`
 
-删除流水并回滚资产余额，返回 `{"deleted": 1}`。若该流水属于某次转账
-（`transfer_group_id` 非空），会同组删除配对的两条，返回 `{"deleted": 2}`。
-若该转账来自定投，对应执行记录会标记为 `REVERSED`。
+删除流水，普通流水返回 `{"deleted": 1}`。查询参数 `rollback_assets` 可为 `true` 或 `false`，
+默认 `true`，删除时回滚资产余额；设为 `false` 时仅删除流水，资产余额保持不变。
+若该流水属于转账，会同组删除配对的两条底层流水，返回 `{"deleted": 2}`。若该转账来自定投，仅在回滚余额时将对应
+执行记录标记为 `REVERSED`。
 
 ---
 

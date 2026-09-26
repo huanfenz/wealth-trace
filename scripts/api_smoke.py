@@ -86,6 +86,23 @@ def main():
     assert overview["month_income"] == 1000000
     assert overview["month_expense"] == 3500
 
+    deleted = call("DELETE", f"/api/transactions/{transfer['outgoing']['id']}")
+    assert deleted["deleted"] == 2, deleted
+    restored_cash = call("GET", f"/api/assets/{cash['id']}")
+    restored_fund = call("GET", f"/api/assets/{stock_fund['id']}")
+    assert restored_cash["current_balance"] == 2000000 + 1000000 - 3500
+    assert restored_fund["current_balance"] == 5000000
+
+    kept_transfer = call("POST", f"/api/households/{household_id}/transfers",
+                         {"from_asset_id": cash["id"], "to_asset_id": stock_fund["id"],
+                          "amount": 100000})
+    deleted = call("DELETE", f"/api/transactions/{kept_transfer['outgoing']['id']}?rollback_assets=false")
+    assert deleted["deleted"] == 2, deleted
+    kept_cash = call("GET", f"/api/assets/{cash['id']}")
+    kept_fund = call("GET", f"/api/assets/{stock_fund['id']}")
+    assert kept_cash["current_balance"] == restored_cash["current_balance"] - 100000
+    assert kept_fund["current_balance"] == restored_fund["current_balance"] + 100000
+
     print("API smoke test passed")
 
 

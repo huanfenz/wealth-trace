@@ -535,6 +535,21 @@ TEST_F(ServiceFixture, DeleteTransferRemovesPairAndRestoresBalances) {
   EXPECT_EQ(transactions.count(query), 0);
 }
 
+TEST_F(ServiceFixture, DeleteTransferWithoutRollbackKeepsBothBalances) {
+  const Asset source = make_asset("活期", AssetType::Cash, 10000);
+  const Asset target = make_asset("储蓄", AssetType::Cash, 1000);
+  TransactionService transactions(database_);
+  const auto transfer = transactions.transfer(household_.id, source.id, target.id, 500, "",
+                                              std::nullopt);
+  EXPECT_EQ(transactions.remove(transfer.outgoing.id, false), 2);
+  AssetService assets(database_);
+  EXPECT_EQ(assets.get(source.id).current_balance, 9500);
+  EXPECT_EQ(assets.get(target.id).current_balance, 1500);
+  TransactionQuery query;
+  query.household_id = household_.id;
+  EXPECT_EQ(transactions.count(query), 0);
+}
+
 // 验证删除不存在的流水抛 not_found。
 TEST_F(ServiceFixture, DeleteMissingTransactionRejected) {
   TransactionService transactions(database_);

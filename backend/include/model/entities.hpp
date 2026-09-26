@@ -55,7 +55,7 @@ struct Asset {
   AssetType asset_type = AssetType::Cash;      // 资产类型
   std::int64_t opening_balance = 0;            // 期初金额（分）
   std::int64_t current_balance = 0;            // 当前金额（分）：负债为负值，正资产为非负；
-                                               // 恒满足 current_balance = opening_balance + Σ transaction_delta
+                                               // 仅删除流水并保留余额后可与期初加流水增量不一致
   AssetStatus status = AssetStatus::Active;    // 状态：Active=持有，Closed=已关闭
   std::optional<std::string> remark;           // 备注（可空）
   std::string created_at;                      // 创建时间，UTC "YYYY-MM-DD HH:MM:SS"

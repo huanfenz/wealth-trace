@@ -333,7 +333,8 @@ WEALTH_TRACE_CONFIG=/path/to/config.json ./build/backend/wealth-trace
 | GET | `/api/investment-plans/{id}/executions` | 定投执行历史 |
 | POST | `/api/investment-executions/{id}/retry` | 重试失败定投期次 |
 | GET | `/api/transactions/{id}` | 单条流水 |
-| DELETE | `/api/transactions/{id}` | 删除流水（回滚余额，转账成对删除） |
+| PUT | `/api/transactions/{id}/category` | 修改收入或支出流水的分类 |
+| DELETE | `/api/transactions/{id}` | 删除流水（可选回滚余额，转账成对处理） |
 | GET | `/api/households/{id}/statistics/overview` | 家庭总览 |
 | GET | `/api/households/{id}/statistics/period` | 区间收支统计 |
 | GET | `/api/households/{id}/statistics/monthly` | 近 N 个月收支趋势 |
