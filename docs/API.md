@@ -528,11 +528,11 @@
 
 ### `GET /api/transactions/{id}`
 
-返回完整交易 DTO 和 Entries。
+返回完整交易 DTO 和 Entries；`editable` 表示交易能否编辑。已关联定投执行记录的投资交易为 `false`。
 
 ### `PUT /api/transactions/{id}`
 
-按创建接口的 `type` / `category_id` / `entries` / `transaction_time` / `remark` 更新交易。替换 Entries 和各资产余额在同一 SQLite 事务中完成。
+按创建接口的 `type` / `category_id` / `entries` / `transaction_time` / `remark` 更新交易。原交易的类型和投资动作不可更改。旧交易只有分类名称、没有分类 ID 时，可传 `preserve_legacy_category: true` 保留该名称；否则 `category_id: null` 会清空分类。`rollback_assets` 查询参数默认 `true`：先撤销旧 Entries 对余额的影响，再应用新 Entries；设为 `false` 时更新 Entries 但保留资产当前余额，新 Entries 的余额快照为空。金额、方向及资产均未变化时只更新交易信息，保留原 Entries 和余额快照。更新在同一 SQLite 事务中完成。
 已关联成功定投执行记录的交易不能通过此接口编辑，以保持执行历史与交易一致。
 
 ### `PUT /api/transactions/{id}/category`

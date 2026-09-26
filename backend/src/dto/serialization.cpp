@@ -312,6 +312,7 @@ nlohmann::json to_json(const TransactionEntry& e) {
 }
 nlohmann::json to_json(const TransactionDTO& d) {
   auto result=to_json(d.transaction);
+  result["editable"]=d.editable;
   result["title"]=d.title;result["subtitle"]=optional_text(d.subtitle);result["amount"]=d.amount;
   result["direction"]=std::string(to_string(d.direction));
   result["source_asset"]=d.source_asset_id?nlohmann::json{{"id",*d.source_asset_id},{"name",*d.source_asset_name}}:nlohmann::json(nullptr);

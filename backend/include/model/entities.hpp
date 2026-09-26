@@ -168,6 +168,7 @@ struct TransactionEntry {
 
 struct TransactionDTO {
   Transaction transaction;
+  bool editable = true;
   std::int64_t amount = 0;
   DisplayDirection direction = DisplayDirection::Neutral;
   std::string title;

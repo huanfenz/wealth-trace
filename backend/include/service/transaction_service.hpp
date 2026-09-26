@@ -14,6 +14,7 @@ struct TransactionEntryInput { std::int64_t asset_id=0; TransactionDirection dir
 struct TransactionInput {
   TransactionType type=TransactionType::Expense;
   std::optional<std::int64_t> category_id;
+  bool preserve_legacy_category=false;
   std::optional<InvestmentAction> action;
   std::vector<TransactionEntryInput> entries;
   std::string transaction_time;
@@ -30,7 +31,7 @@ class TransactionService {
   Transaction transfer(std::int64_t household,std::int64_t from_asset,std::int64_t to_asset,std::int64_t amount,const std::string& time,const std::optional<std::string>& remark);
   Transaction investment_buy(std::int64_t household,std::int64_t source_asset,std::int64_t target_asset,std::int64_t amount,const std::string& time,const std::optional<std::string>& remark);
   Transaction create(std::int64_t household,const TransactionInput& input);
-  Transaction update(std::int64_t id,const TransactionInput& input);
+  Transaction update(std::int64_t id,const TransactionInput& input,bool rollback_assets=true);
   std::vector<Transaction> list(const TransactionQuery& query);
   std::int64_t count(const TransactionQuery& query);
   Transaction get(std::int64_t id);
@@ -41,7 +42,7 @@ class TransactionService {
   std::int64_t remove(std::int64_t id,bool rollback_assets=true);
  private:
   Transaction record_single(std::int64_t household,TransactionType type,std::int64_t asset,std::optional<std::int64_t> category,std::int64_t amount,const std::string& time,const std::optional<std::string>& remark);
-  Transaction write(std::int64_t household,const TransactionInput& input,std::optional<std::int64_t> id=std::nullopt);
+  Transaction write(std::int64_t household,const TransactionInput& input,std::optional<std::int64_t> id=std::nullopt,bool rollback_assets=true);
   AssetRepository assets_; TransactionRepository transactions_; RecurringInvestmentRepository investments_; Database& database_;
 };
 } // namespace wt

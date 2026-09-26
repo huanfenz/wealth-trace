@@ -314,6 +314,16 @@ export function deleteTransaction(id: number, rollbackAssets = true): Promise<{ 
   return del<{ deleted: number }>(`/transactions/${id}?rollback_assets=${rollbackAssets}`)
 }
 
+/** 获取完整交易及其 Entries，用于编辑回填。 */
+export function getTransaction(id: number): Promise<Transaction> {
+  return get<Transaction>(`/transactions/${id}`)
+}
+
+/** 更新交易；rollbackAssets=false 时保留各资产当前余额。 */
+export function updateTransaction(id: number, body: Record<string, unknown>, rollbackAssets = true): Promise<Transaction> {
+  return put<Transaction>(`/transactions/${id}?rollback_assets=${rollbackAssets}`, body)
+}
+
 /** 修改收入或支出流水的分类；null 表示清空分类。 */
 export function updateTransactionCategory(id: number, categoryId: number | null): Promise<Transaction> {
   return put<Transaction>(`/transactions/${id}/category`, { category_id: categoryId })

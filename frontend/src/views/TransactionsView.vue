@@ -55,10 +55,12 @@
             </span>
           </template>
         </el-table-column>
-        <el-table-column prop="remark" label="备注" min-width="240" show-overflow-tooltip />
+        <el-table-column label="备注" min-width="240" show-overflow-tooltip>
+          <template #default="{ row }">{{ row.remark?.trim() || '—' }}</template>
+        </el-table-column>
         <el-table-column label="操作" width="110" align="right">
           <template #default="{ row }">
-            <el-button v-if="row.type === 'INCOME' || row.type === 'EXPENSE'" link type="primary" @click="openCategoryEditor(row)">编辑</el-button>
+            <el-button link type="primary" @click="openEditor(row)">编辑</el-button>
             <el-button link type="danger" @click="remove(row)">删除</el-button>
           </template>
         </el-table-column>
@@ -118,27 +120,56 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="editDialogVisible" title="编辑交易分类" width="420px" :close-on-click-modal="false">
-      <el-form label-width="70px">
-        <el-form-item label="分类">
-          <el-select v-model="editCategoryId" clearable :value-on-clear="null" filterable placeholder="未分类" style="width: 100%">
-            <el-option
-              v-if="unavailableCategory"
-              :label="unavailableCategory.label"
-              :value="unavailableCategory.id"
-              disabled
-            />
+    <el-dialog v-model="editDialogVisible" :title="`编辑${editingTransaction ? typeLabel(editingTransaction) : '交易'}`" width="480px" :close-on-click-modal="false" :close-on-press-escape="!editSaving" :show-close="!editSaving">
+      <el-form v-if="editingTransaction" label-width="90px">
+        <el-form-item v-if="editIsTwoAsset" label="转出资产" required>
+          <el-select v-model="editForm.from_asset_id" filterable style="width: 100%">
+            <el-option v-for="asset in editAssetOptions" :key="asset.id" :label="asset.label" :value="asset.id" :disabled="asset.unavailable" />
+          </el-select>
+        </el-form-item>
+        <el-form-item v-if="editIsTwoAsset" :label="editingTransaction.type === 'INVESTMENT' ? '目标资产' : '转入资产'" required>
+          <el-select v-model="editForm.to_asset_id" filterable style="width: 100%">
+            <el-option v-for="asset in editAssetOptions" :key="asset.id" :label="asset.label" :value="asset.id" :disabled="asset.unavailable" />
+          </el-select>
+        </el-form-item>
+        <el-form-item v-else label="资产" required>
+          <el-select v-model="editForm.asset_id" filterable style="width: 100%">
+            <el-option v-for="asset in editAssetOptions" :key="asset.id" :label="asset.label" :value="asset.id" :disabled="asset.unavailable" />
+          </el-select>
+        </el-form-item>
+        <el-form-item v-if="editIsCategorized" label="分类">
+          <el-select v-model="editForm.category_id" clearable :value-on-clear="null" filterable placeholder="未分类" style="width: 100%">
+            <el-option v-if="legacyCategory" :label="`${legacyCategory}（历史分类）`" value="legacy" />
+            <el-option v-if="unavailableCategory" :label="unavailableCategory.label" :value="unavailableCategory.id" disabled />
             <el-option v-for="category in editCategories" :key="category.id" :label="category.name" :value="category.id" />
           </el-select>
         </el-form-item>
+        <el-form-item :label="editingTransaction.type === 'ADJUSTMENT' ? '调整金额(元)' : '金额(元)'" required>
+          <el-input v-model="editForm.amount_yuan" />
+        </el-form-item>
+        <el-form-item label="时间" required>
+          <el-date-picker v-model="editForm.transaction_time" type="datetime" value-format="YYYY-MM-DD HH:mm:ss" style="width: 100%" />
+        </el-form-item>
+        <el-form-item label="备注"><el-input v-model="editForm.remark" maxlength="500" /></el-form-item>
       </el-form>
-      <p v-if="editingTransaction?.category_id === null && editingTransaction.category" class="edit-hint">
-        原分类“{{ editingTransaction.category }}”来自旧记录，请选择现有分类或清空。
-      </p>
-      <p v-if="unavailableCategory" class="edit-hint">原分类已停用，请选择可用分类或清空。</p>
+      <p v-if="legacyCategory" class="edit-hint">原分类“{{ legacyCategory }}”来自旧记录，可保留、替换或清空。</p>
+      <p v-if="unavailableCategory" class="edit-hint">原分类已停用；保持原值或选择其他分类。</p>
       <template #footer>
         <el-button :disabled="editSaving" @click="editDialogVisible = false">取消</el-button>
-        <el-button type="primary" :loading="editSaving" :disabled="!canSaveCategory" @click="saveCategory">保存</el-button>
+        <el-button type="primary" :loading="editSaving" @click="saveEdit">保存</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="editBalanceDialogVisible" title="更新资产余额" width="480px" :close-on-click-modal="false" :close-on-press-escape="!editSaving" :show-close="!editSaving">
+      <p>交易金额或关联资产已改变，请选择资产余额的处理方式。</p>
+      <el-radio-group v-model="editBalanceMode" class="delete-options">
+        <el-radio value="rollback">撤销原交易影响，并按新交易更新资产余额</el-radio>
+        <el-radio value="records">仅更新交易记录，资产当前余额保持不变</el-radio>
+      </el-radio-group>
+      <p class="edit-hint">保留资产余额后，流水合计可能与资产余额不一致。</p>
+      <template #footer>
+        <el-button :disabled="editSaving" @click="editBalanceDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="editSaving" :disabled="!editBalanceMode" @click="confirmEdit">确认保存</el-button>
       </template>
     </el-dialog>
 
@@ -173,18 +204,19 @@ import { Edit, Minus, Plus, Sort } from '@element-plus/icons-vue'
 
 import {
   deleteTransaction,
+  getTransaction,
   listAssetTransactions,
   listTransactions,
   recordAdjustment,
   recordExpense,
   recordIncome,
   transfer,
-  updateTransactionCategory,
+  updateTransaction,
 } from '@/api'
 import { useAppStore } from '@/stores/app'
 import { transactionTypeLabels } from '@/utils/labels'
-import { formatMoney, toMinor } from '@/utils/money'
-import type { Transaction, TransactionType } from '@/types'
+import { formatMoney, toMinor, toYuanInput } from '@/utils/money'
+import type { Transaction, TransactionEntry, TransactionType } from '@/types'
 
 type DialogKind = 'income' | 'expense' | 'transfer' | 'adjustment' // 弹窗形态
 type DeleteMode = 'records' | 'rollback'
@@ -210,8 +242,24 @@ const deleting = ref(false)
 const deleteHasTransfer = computed(() => deleteTargets.value.some((item) => item.type === 'TRANSFER'))
 const editDialogVisible = ref(false)
 const editingTransaction = ref<Transaction | null>(null)
-const editCategoryId = ref<number | null>(null)
 const editSaving = ref(false)
+const editBalanceDialogVisible = ref(false)
+const editBalanceMode = ref<DeleteMode | null>(null)
+const editForm = reactive({
+  asset_id: 0,
+  from_asset_id: 0,
+  to_asset_id: 0,
+  category_id: null as number | 'legacy' | null,
+  amount_yuan: '',
+  transaction_time: '',
+  remark: '',
+})
+const editIsTwoAsset = computed(() => editingTransaction.value?.type === 'TRANSFER' || editingTransaction.value?.type === 'INVESTMENT')
+const editIsCategorized = computed(() => editingTransaction.value?.type === 'INCOME' || editingTransaction.value?.type === 'EXPENSE')
+const legacyCategory = computed(() => {
+  const transaction = editingTransaction.value
+  return transaction?.category_id === null ? transaction.category : null
+})
 const editCategories = computed(() =>
   editingTransaction.value?.type === 'INCOME' ? store.incomeCategories : store.expenseCategories,
 )
@@ -221,10 +269,17 @@ const unavailableCategory = computed(() => {
   if (editCategories.value.some((category) => category.id === transaction.category_id)) return null
   return { id: transaction.category_id, label: `${transaction.category ?? `#${transaction.category_id}`}（已停用）` }
 })
-const canSaveCategory = computed(() =>
-  !!editingTransaction.value && !editSaving.value &&
-  (editCategoryId.value === null || editCategories.value.some((category) => category.id === editCategoryId.value)),
-)
+const editAssetOptions = computed(() => {
+  const options = store.assets.map((asset) => ({ id: asset.id, label: assetLabel(asset.id), unavailable: asset.status !== 'ACTIVE' }))
+  const transaction = editingTransaction.value
+  if (!transaction) return options
+  for (const entry of transaction.entries ?? []) {
+    if (options.some((item) => item.id === entry.asset_id)) continue
+    const reference = entry.direction === 'OUT' ? transaction.source_asset : transaction.destination_asset
+    options.push({ id: entry.asset_id, label: `${reference?.name ?? `#${entry.asset_id}`}（不可用）`, unavailable: true })
+  }
+  return options
+})
 
 // 各形态对应的弹窗标题。
 const dialogTitles: Record<DialogKind, string> = {
@@ -400,20 +455,109 @@ onMounted(async () => {
   await load()
 })
 
-function openCategoryEditor(transaction: Transaction) {
-  editingTransaction.value = transaction
-  editCategoryId.value = transaction.category_id
-  editDialogVisible.value = true
+async function openEditor(transaction: Transaction) {
+  try {
+    const detail = await getTransaction(transaction.id)
+    if (!detail.editable) {
+      ElMessage.warning('这笔投资交易关联定投执行记录，不能编辑')
+      return
+    }
+    if (!detail.entries?.length) throw new Error('交易缺少资产流水，无法编辑')
+    editingTransaction.value = detail
+    const outgoing = detail.entries.find((entry) => entry.direction === 'OUT')
+    const incoming = detail.entries.find((entry) => entry.direction === 'IN')
+    editForm.asset_id = detail.entries[0].asset_id
+    editForm.from_asset_id = outgoing?.asset_id ?? 0
+    editForm.to_asset_id = incoming?.asset_id ?? 0
+    editForm.category_id = detail.category_id ?? (detail.category ? 'legacy' : null)
+    editForm.amount_yuan = toYuanInput(detail.type === 'ADJUSTMENT' && detail.entries[0].direction === 'OUT' ? -detail.amount : detail.amount)
+    editForm.transaction_time = detail.transaction_time
+    editForm.remark = detail.remark ?? ''
+    editBalanceMode.value = null
+    editDialogVisible.value = true
+  } catch (error) {
+    ElMessage.error((error as Error).message)
+  }
 }
 
-async function saveCategory() {
-  if (!canSaveCategory.value || !editingTransaction.value) return
+type EditableEntry = Pick<TransactionEntry, 'asset_id' | 'direction' | 'amount'>
+
+function editEntries(amount: number): EditableEntry[] {
+  const type = editingTransaction.value!.type
+  if (type === 'TRANSFER' || type === 'INVESTMENT') {
+    return [
+      { asset_id: editForm.from_asset_id, direction: 'OUT', amount },
+      { asset_id: editForm.to_asset_id, direction: 'IN', amount },
+    ]
+  }
+  const direction = type === 'INCOME' || (type === 'ADJUSTMENT' && amount > 0) ? 'IN' : 'OUT'
+  return [{ asset_id: editForm.asset_id, direction, amount: Math.abs(amount) }]
+}
+
+function validEditAmount(): number | null {
+  const input = editForm.amount_yuan.trim()
+  if (!/^-?\d+(?:\.\d{1,2})?$/.test(input)) return null
+  const amount = toMinor(input)
+  if (!Number.isSafeInteger(amount) || amount === 0 || (editingTransaction.value?.type !== 'ADJUSTMENT' && amount < 0)) return null
+  return amount
+}
+
+function entriesDiffer(next: EditableEntry[]): boolean {
+  const old = editingTransaction.value?.entries ?? []
+  return old.length !== next.length || old.some((entry, index) =>
+    entry.asset_id !== next[index].asset_id || entry.direction !== next[index].direction || entry.amount !== next[index].amount,
+  )
+}
+
+async function saveEdit() {
+  if (!editingTransaction.value || editSaving.value) return
+  const amount = validEditAmount()
+  if (amount === null) { ElMessage.warning('请输入有效金额，最多两位小数'); return }
+  const entries = editEntries(amount)
+  if (entries.some((entry) => !entry.asset_id) || (editIsTwoAsset.value && editForm.from_asset_id === editForm.to_asset_id)) {
+    ElMessage.warning('请选择不同的有效资产')
+    return
+  }
+  if (!editForm.transaction_time) { ElMessage.warning('请选择交易时间'); return }
+  if (editIsCategorized.value && editForm.category_id !== null &&
+      editForm.category_id !== editingTransaction.value.category_id &&
+      editForm.category_id !== 'legacy' && !editCategories.value.some((category) => category.id === editForm.category_id)) {
+    ElMessage.warning('请选择可用分类')
+    return
+  }
+  if (entriesDiffer(entries)) {
+    editBalanceMode.value = null
+    editBalanceDialogVisible.value = true
+    return
+  }
+  await persistEdit(true, entries)
+}
+
+async function confirmEdit() {
+  if (!editBalanceMode.value || editSaving.value) return
+  const amount = validEditAmount()
+  if (amount === null) return
+  await persistEdit(editBalanceMode.value === 'rollback', editEntries(amount))
+}
+
+async function persistEdit(rollbackAssets: boolean, entries: EditableEntry[]) {
+  const transaction = editingTransaction.value
+  if (!transaction) return
   editSaving.value = true
   try {
-    await updateTransactionCategory(editingTransaction.value.id, editCategoryId.value)
+    await updateTransaction(transaction.id, {
+      type: transaction.type,
+      action: transaction.action,
+      category_id: editIsCategorized.value && typeof editForm.category_id === 'number' ? editForm.category_id : null,
+      preserve_legacy_category: editIsCategorized.value && editForm.category_id === 'legacy',
+      entries,
+      transaction_time: editForm.transaction_time,
+      remark: editForm.remark,
+    }, rollbackAssets)
+    editBalanceDialogVisible.value = false
     editDialogVisible.value = false
-    await load()
-    ElMessage.success('分类已更新')
+    await Promise.all([load(), store.refreshAssets()])
+    ElMessage.success('交易已更新')
   } catch (error) {
     ElMessage.error((error as Error).message)
   } finally {

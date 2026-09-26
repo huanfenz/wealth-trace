@@ -610,6 +610,7 @@ TEST_F(ServiceFixture, LinkedRecurringInvestmentCannotBeEditedIntoAnotherBusines
   edited.entries={{source.id,TransactionDirection::Out,1000},{target.id,TransactionDirection::In,1000}};
   EXPECT_THROW(service.update(tx.id,edited),ApiError);
   EXPECT_EQ(service.get(tx.id).type,TransactionType::Investment);
+  EXPECT_FALSE(service.dto(tx.id).editable);
   EXPECT_EQ(AssetService(database_).get(source.id).current_balance,499000);
   Statement check(database_,"SELECT status,transaction_id FROM recurring_investment_execution WHERE plan_id=?;");
   check.bind(1,plan_id);ASSERT_TRUE(check.step());EXPECT_EQ(check.get_text(0),"SUCCESS");EXPECT_EQ(check.get_int64(1),tx.id);
@@ -660,6 +661,92 @@ TEST_F(ServiceFixture, EditingTransferReversesOldEntriesAndAppliesNewOnes) {
   EXPECT_EQ(AssetService(database_).get(new_target.id).current_balance,2000);
   const auto entries=TransactionRepository(database_).entries(tx.id);
   ASSERT_EQ(entries.size(),2u);EXPECT_EQ(entries[0].amount,1500);EXPECT_EQ(entries[1].asset_id,new_target.id);
+}
+
+TEST_F(ServiceFixture, EditingTransferCanKeepAllAssetBalances) {
+  const Asset source=make_asset("来源",AssetType::Cash,10000);
+  const Asset old_target=make_asset("旧目标",AssetType::Cash,1000);
+  const Asset new_target=make_asset("新目标",AssetType::Cash,500);
+  TransactionService service(database_);
+  const auto tx=service.transfer(household_.id,source.id,old_target.id,1000,"",std::nullopt);
+  TransactionInput edited;edited.type=TransactionType::Transfer;edited.transaction_time=tx.transaction_time;
+  edited.entries={{source.id,TransactionDirection::Out,1500},{new_target.id,TransactionDirection::In,1500}};
+  service.update(tx.id,edited,false);
+  EXPECT_EQ(AssetService(database_).get(source.id).current_balance,9000);
+  EXPECT_EQ(AssetService(database_).get(old_target.id).current_balance,2000);
+  EXPECT_EQ(AssetService(database_).get(new_target.id).current_balance,500);
+  const auto entries=TransactionRepository(database_).entries(tx.id);
+  ASSERT_EQ(entries.size(),2u);
+  EXPECT_EQ(entries[0].amount,1500);
+  EXPECT_EQ(entries[1].asset_id,new_target.id);
+  EXPECT_FALSE(entries[0].balance_before.has_value());
+  EXPECT_FALSE(entries[1].balance_after.has_value());
+}
+
+TEST_F(ServiceFixture, MetadataOnlyEditKeepsEntriesAndBalances) {
+  const Asset cash=make_asset("现金",AssetType::Cash,1000);
+  TransactionService service(database_);
+  const auto tx=service.record_income(household_.id,cash.id,std::nullopt,200,"",std::nullopt);
+  const auto before=TransactionRepository(database_).entries(tx.id);
+  ASSERT_EQ(before.size(),1u);
+  AssetService(database_).update_status(cash.id,AssetStatus::Closed);
+  TransactionInput edited;edited.type=TransactionType::Income;edited.transaction_time=tx.transaction_time;
+  edited.remark="修改备注";edited.entries={{cash.id,TransactionDirection::In,200}};
+  EXPECT_NO_THROW(service.update(tx.id,edited));
+  const auto after=TransactionRepository(database_).entries(tx.id);
+  ASSERT_EQ(after.size(),1u);
+  EXPECT_EQ(after[0].id,before[0].id);
+  EXPECT_EQ(after[0].balance_before,before[0].balance_before);
+  EXPECT_EQ(after[0].balance_after,before[0].balance_after);
+  EXPECT_EQ(AssetService(database_).get(cash.id).current_balance,1200);
+  EXPECT_EQ(service.get(tx.id).remark,std::optional<std::string>("修改备注"));
+}
+
+TEST_F(ServiceFixture, LegacyCategoryCanBeKeptOrClearedWhileEditing) {
+  const Asset cash=make_asset("现金",AssetType::Cash,1000);
+  TransactionService service(database_);
+  const auto tx=service.record_income(household_.id,cash.id,std::nullopt,200,"",std::nullopt);
+  Statement legacy(database_,"UPDATE transactions SET category='旧分类' WHERE id=?;");
+  legacy.bind(1,tx.id).run();
+  TransactionInput edited;edited.type=TransactionType::Income;edited.transaction_time=tx.transaction_time;
+  edited.entries={{cash.id,TransactionDirection::In,200}};
+  edited.preserve_legacy_category=true;
+  service.update(tx.id,edited);
+  EXPECT_EQ(service.get(tx.id).category,std::optional<std::string>("旧分类"));
+  edited.preserve_legacy_category=false;
+  service.update(tx.id,edited);
+  EXPECT_FALSE(service.get(tx.id).category.has_value());
+}
+
+TEST_F(ServiceFixture, AdjustmentDirectionCanChangeAndFailedEditRollsBack) {
+  const Asset cash=make_asset("现金",AssetType::Cash,1000);
+  TransactionService service(database_);
+  const auto tx=service.record_adjustment(household_.id,cash.id,200,"",std::nullopt);
+  TransactionInput edited;edited.type=TransactionType::Adjustment;edited.transaction_time=tx.transaction_time;
+  edited.entries={{cash.id,TransactionDirection::Out,300}};
+  service.update(tx.id,edited);
+  EXPECT_EQ(AssetService(database_).get(cash.id).current_balance,700);
+  edited.entries={{cash.id,TransactionDirection::Out,300},{cash.id,TransactionDirection::In,300}};
+  EXPECT_THROW(service.update(tx.id,edited),ApiError);
+  EXPECT_EQ(AssetService(database_).get(cash.id).current_balance,700);
+  const auto entries=TransactionRepository(database_).entries(tx.id);
+  ASSERT_EQ(entries.size(),1u);
+  EXPECT_EQ(entries[0].direction,TransactionDirection::Out);
+}
+
+TEST_F(ServiceFixture, EditingInvestmentBuyUpdatesPrincipalAndBalances) {
+  const Asset source=make_asset("付款",AssetType::Cash,5000);
+  const Asset target=make_asset("基金",AssetType::StockFund,0);
+  TransactionService service(database_);
+  const auto tx=service.investment_buy(household_.id,source.id,target.id,4000,"",std::nullopt);
+  TransactionInput edited;edited.type=TransactionType::Investment;edited.action=InvestmentAction::Buy;
+  edited.transaction_time=tx.transaction_time;
+  edited.entries={{source.id,TransactionDirection::Out,4500},{target.id,TransactionDirection::In,4500}};
+  EXPECT_NO_THROW(service.update(tx.id,edited));
+  EXPECT_EQ(AssetService(database_).get(source.id).current_balance,500);
+  EXPECT_EQ(AssetService(database_).get(target.id).current_balance,4500);
+  Statement detail(database_,"SELECT asset_id,principal FROM investment_transaction_details WHERE transaction_id=?;");
+  detail.bind(1,tx.id);ASSERT_TRUE(detail.step());EXPECT_EQ(detail.get_int64(0),target.id);EXPECT_EQ(detail.get_int64(1),4500);
 }
 
 TEST_F(ServiceFixture, AssetWithTransactionEntriesCannotBeHardDeleted) {

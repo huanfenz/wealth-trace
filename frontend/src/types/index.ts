@@ -168,6 +168,7 @@ export interface Asset {
 /** 交易流水：收入/支出/转账/调整。 */
 export interface Transaction {
   id: number
+  editable: boolean // 已关联定投执行的投资交易不可编辑
   household_id: number
   owner_member_id: number // 属主成员
   type: TransactionType
