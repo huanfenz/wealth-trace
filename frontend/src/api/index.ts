@@ -242,6 +242,7 @@ export interface TransactionQuery {
   ownerMemberId?: number // 按成员筛选
   assetId?: number       // 按资产筛选
   type?: string          // 按交易类型筛选
+  categoryId?: number    // 按分类筛选
   from?: string          // 起始时间（含）
   to?: string            // 结束时间（含）
   limit?: number         // 每页条数
@@ -257,6 +258,7 @@ export function listTransactions(
     owner_member_id: query.ownerMemberId,
     asset_id: query.assetId,
     type: query.type,
+    category_id: query.categoryId,
     from: query.from,
     to: query.to,
     limit: query.limit,
@@ -270,6 +272,7 @@ export function listAssetTransactions(assetId: number, householdId: number, quer
     household_id: householdId,
     owner_member_id: query.ownerMemberId,
     type: query.type,
+    category_id: query.categoryId,
     from: query.from,
     to: query.to,
     limit: query.limit,

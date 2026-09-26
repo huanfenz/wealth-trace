@@ -23,6 +23,14 @@
       <el-select v-model="filterType" clearable placeholder="按类型" style="width: 140px" @change="reload">
         <el-option v-for="(label, value) in transactionTypeLabels" :key="value" :label="label" :value="value" />
       </el-select>
+      <el-select v-model="filterCategory" clearable filterable placeholder="按分类" style="width: 180px" @change="reload">
+        <el-option
+          v-for="category in store.categories.filter((item) => item.active)"
+          :key="category.id"
+          :label="`${category.type === 'INCOME' ? '收入' : '支出'} · ${category.name}`"
+          :value="category.id"
+        />
+      </el-select>
       <div class="spacer" />
       <el-button type="danger" :disabled="selectedTransactions.length === 0" @click="bulkRemove">批量删除</el-button>
       <span v-if="selectedTransactions.length" class="selection-count">已选 {{ selectedTransactions.length }} 项</span>
@@ -233,6 +241,7 @@ const pageSize = 20                         // 每页条数
 const filterMember = ref<number | undefined>(undefined) // 按成员筛选
 const filterAsset = ref<number | undefined>(undefined)  // 按资产筛选
 const filterType = ref<string | undefined>(undefined)   // 按交易类型筛选
+const filterCategory = ref<number | undefined>(undefined) // 按分类筛选
 const dialogVisible = ref(false)      // 弹窗显隐
 const kind = ref<DialogKind>('income') // 当前弹窗形态
 const deleteDialogVisible = ref(false)
@@ -351,6 +360,7 @@ async function load() {
       ownerMemberId: filterMember.value,
       assetId: filterAsset.value,
       type: filterType.value,
+      categoryId: filterCategory.value,
       limit: pageSize,
       offset: (page.value - 1) * pageSize,
     }

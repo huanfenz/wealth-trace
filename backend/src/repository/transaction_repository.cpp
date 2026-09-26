@@ -25,6 +25,7 @@ std::string where_clause(const TransactionQuery& q, std::vector<std::string>& te
   std::string w=" WHERE t.household_id=?"; ints.push_back(q.household_id);
   if(q.owner_member_id){w+=" AND (t.owner_member_id=? OR EXISTS (SELECT 1 FROM transaction_entries oe WHERE oe.transaction_id=t.id AND oe.owner_member_id=?))";ints.push_back(*q.owner_member_id);ints.push_back(*q.owner_member_id);}
   if(q.asset_id){w+=" AND EXISTS (SELECT 1 FROM transaction_entries e WHERE e.transaction_id=t.id AND e.asset_id=?)";ints.push_back(*q.asset_id);}
+  if(q.category_id){w+=" AND t.category_id=?";ints.push_back(*q.category_id);}
   if(q.type){w+=" AND t.type=?";texts.emplace_back(to_string(*q.type));}
   if(q.from_time){w+=" AND t.transaction_time>=?";texts.push_back(*q.from_time);}
   if(q.to_time){w+=" AND t.transaction_time<=?";texts.push_back(*q.to_time);}

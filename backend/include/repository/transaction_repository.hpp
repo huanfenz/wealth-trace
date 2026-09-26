@@ -14,6 +14,7 @@ struct TransactionQuery {
   std::int64_t household_id = 0;
   std::optional<std::int64_t> owner_member_id;
   std::optional<std::int64_t> asset_id;
+  std::optional<std::int64_t> category_id;
   std::optional<TransactionType> type;
   std::optional<std::string> from_time;
   std::optional<std::string> to_time;
