@@ -28,6 +28,7 @@ core_sources = files(
   'src/service/account_service.cpp',
   'src/service/asset_service.cpp',
   'src/service/transaction_service.cpp',
+  'src/service/category_service.cpp',
   'src/service/statistics_service.cpp',
   'src/service/daily_maintenance_service.cpp',
   'src/service/recurring_investment_service.cpp',
@@ -38,11 +39,13 @@ core_sources = files(
   'src/controller/account_controller.cpp',
   'src/controller/asset_controller.cpp',
   'src/controller/transaction_controller.cpp',
+  'src/controller/category_controller.cpp',
   'src/controller/statistics_controller.cpp',
   'src/controller/meta_controller.cpp',
   'src/controller/static_file_controller.cpp',
   'src/controller/maintenance_controller.cpp',
   'src/controller/recurring_investment_controller.cpp',
+  'src/controller/database_controller.cpp',
 )
 
 core_deps = [sqlite3_dep, crow_dep, asio_dep, nlohmann_dep, thread_dep]

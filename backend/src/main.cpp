@@ -14,9 +14,11 @@
 #include "config/config.hpp"
 #include "controller/account_controller.hpp"
 #include "controller/asset_controller.hpp"
+#include "controller/category_controller.hpp"
 #include "controller/household_controller.hpp"
 #include "controller/http_util.hpp"
 #include "controller/maintenance_controller.hpp"
+#include "controller/database_controller.hpp"
 #include "controller/recurring_investment_controller.hpp"
 #include "controller/member_controller.hpp"
 #include "controller/meta_controller.hpp"
@@ -116,11 +118,14 @@ int main(int argc, char** argv) {
   AccountController account_controller(database);
   AssetController asset_controller(database);
   TransactionController transaction_controller(database);
+  CategoryController category_controller(database, config.categories);
   StatisticsController statistics_controller(database);
   MetaController meta_controller(config.categories);
   StaticFileController static_controller(config.frontend);
   MaintenanceController maintenance_controller(database);
   RecurringInvestmentController investment_controller(database);
+  DatabaseController database_controller(database, config.database.path,
+                                         config.database.migrations_dir);
 
   // 先注册所有 API 路由，确保其优先于后面的静态文件通配路由。
   household_controller.register_routes(app);
@@ -128,10 +133,12 @@ int main(int argc, char** argv) {
   account_controller.register_routes(app);
   asset_controller.register_routes(app);
   transaction_controller.register_routes(app);
+  category_controller.register_routes(app);
   statistics_controller.register_routes(app);
   meta_controller.register_routes(app);
   maintenance_controller.register_routes(app);
   investment_controller.register_routes(app);
+  database_controller.register_routes(app);
   // 任意 /api/ 路径的 CORS OPTIONS 预检请求统一返回 204。
   CROW_ROUTE(app, "/api/<path>").methods("OPTIONS"_method)(
       [](const crow::request&, std::string) {

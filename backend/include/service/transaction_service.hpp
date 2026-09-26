@@ -37,14 +37,22 @@ class TransactionService {
   // 记一笔收入：资产必须存在且 ACTIVE，amount 必须为正（>0）。
   // 业务错误：not_found / invalid_request / conflict（资产已关闭）。
   Transaction record_income(std::int64_t household_id, std::int64_t asset_id,
-                            const std::optional<std::string>& category,
+                            const std::optional<std::int64_t>& category_id,
                             std::int64_t amount, const std::string& transaction_time,
+                            const std::optional<std::string>& remark);
+  Transaction record_income(std::int64_t household_id, std::int64_t asset_id,
+                            const std::string& legacy_category, std::int64_t amount,
+                            const std::string& transaction_time,
                             const std::optional<std::string>& remark);
 
   // 记一笔支出：约束同收入，余额按 -amount 减少。
   Transaction record_expense(std::int64_t household_id, std::int64_t asset_id,
-                             const std::optional<std::string>& category,
+                             const std::optional<std::int64_t>& category_id,
                              std::int64_t amount, const std::string& transaction_time,
+                             const std::optional<std::string>& remark);
+  Transaction record_expense(std::int64_t household_id, std::int64_t asset_id,
+                             const std::string& legacy_category, std::int64_t amount,
+                             const std::string& transaction_time,
                              const std::optional<std::string>& remark);
 
   // 记一笔调整：用于对账纠偏，amount 可正可负（余额直接 +amount），
@@ -80,7 +88,7 @@ class TransactionService {
   // 单资产流水的公共实现：校验金额方向，检查资产 ACTIVE，计算 delta 与
   // 新余额，在事务内写流水并更新余额。收入/支出/调整都复用它。
   Transaction record(std::int64_t household_id, TransactionType type, std::int64_t asset_id,
-                     const std::optional<std::string>& category, std::int64_t amount,
+                     const std::optional<std::int64_t>& category_id, std::int64_t amount,
                      const std::string& transaction_time,
                      const std::optional<std::string>& remark);
 

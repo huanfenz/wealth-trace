@@ -10,6 +10,7 @@
 #include "common/error.hpp"
 #include "database/database.hpp"
 #include "database/transaction.hpp"
+#include "database/statement.hpp"
 #include "utils/strings.hpp"
 #include "utils/time_util.hpp"
 #include "utils/flexible_term.hpp"
@@ -27,17 +28,6 @@ std::string resolved_time(const std::string& transaction_time) {
 }
 
 // 分类/备注清洗：未提供或去空白后为空都归一化为 nullopt（避免空串入库）。
-std::optional<std::string> clean_category(const std::optional<std::string>& category) {
-  if (!category.has_value()) {
-    return std::nullopt;
-  }
-  const auto cleaned = strings::optional_text(*category, "category", 64);
-  if (cleaned.empty()) {
-    return std::nullopt;
-  }
-  return cleaned;
-}
-
 std::optional<std::string> clean_remark(const std::optional<std::string>& remark) {
   if (!remark.has_value()) {
     return std::nullopt;
@@ -53,7 +43,7 @@ std::optional<std::string> clean_remark(const std::optional<std::string>& remark
 
 Transaction TransactionService::record(
     std::int64_t household_id, TransactionType type, std::int64_t asset_id,
-    const std::optional<std::string>& category, std::int64_t amount,
+    const std::optional<std::int64_t>& category_id, std::int64_t amount,
     const std::string& transaction_time, const std::optional<std::string>& remark) {
   // 金额规则：任何类型都不得为 0；除 ADJUSTMENT 外，amount 统一存正数
   // 绝对值，方向完全由 type 决定（详见 transaction_delta）。
@@ -88,7 +78,16 @@ Transaction TransactionService::record(
   transaction.owner_member_id = asset->owner_member_id;
   transaction.asset_id = asset->id;
   transaction.type = type;
-  transaction.category = clean_category(category);
+  if (category_id.has_value()) {
+    Statement category_row(database_, "SELECT name, household_id, type, active FROM transaction_category WHERE id = ?;");
+    category_row.bind(1, *category_id);
+    if (!category_row.step()) throw not_found("category not found");
+    if (category_row.get_int64(1) != household_id || category_row.get_text(2) != to_string(type))
+      throw invalid_request("category does not match household and transaction type");
+    if (category_row.get_int64(3) == 0) throw conflict("category is inactive");
+    transaction.category_id = *category_id;
+    transaction.category = category_row.get_text(0);
+  }
   transaction.amount = amount;
   // 快照前后余额，便于对账与追溯；账实不符时可据此定位。
   transaction.balance_before = asset->current_balance;
@@ -111,23 +110,63 @@ Transaction TransactionService::record(
 // 收入：余额 +amount。
 Transaction TransactionService::record_income(
     std::int64_t household_id, std::int64_t asset_id,
-    const std::optional<std::string>& category,
+    const std::optional<std::int64_t>& category_id,
     std::int64_t amount, const std::string& transaction_time,
     const std::optional<std::string>& remark) {
   std::scoped_lock lock(database_.mutex());
-  return record(household_id, TransactionType::Income, asset_id, category, amount, transaction_time,
+  return record(household_id, TransactionType::Income, asset_id, category_id, amount, transaction_time,
                 remark);
+}
+
+Transaction TransactionService::record_income(std::int64_t household_id, std::int64_t asset_id,
+    const std::string& category, std::int64_t amount, const std::string& transaction_time,
+    const std::optional<std::string>& remark) {
+  std::optional<std::int64_t> id;
+  if (!strings::is_blank(category)) {
+    std::scoped_lock lock(database_.mutex());
+    const auto name = strings::require_text(category, "category", 64);
+    Statement find(database_, "SELECT id FROM transaction_category WHERE household_id=? AND type='INCOME' AND name=?;");
+    find.bind(1, household_id).bind(2, name);
+    if (find.step()) id = find.get_int64(0);
+    else {
+      const auto now = time_util::now_iso8601();
+      Statement add(database_, "INSERT INTO transaction_category (household_id,type,name,sort_order,active,created_at,updated_at) VALUES (?,'INCOME',?,0,1,?,?);");
+      add.bind(1, household_id).bind(2, name).bind(3, now).bind(4, now).run();
+      id = database_.last_insert_rowid();
+    }
+  }
+  return record_income(household_id, asset_id, id, amount, transaction_time, remark);
 }
 
 // 支出：余额 -amount。
 Transaction TransactionService::record_expense(
     std::int64_t household_id, std::int64_t asset_id,
-    const std::optional<std::string>& category,
+    const std::optional<std::int64_t>& category_id,
     std::int64_t amount, const std::string& transaction_time,
     const std::optional<std::string>& remark) {
   std::scoped_lock lock(database_.mutex());
-  return record(household_id, TransactionType::Expense, asset_id, category, amount, transaction_time,
+  return record(household_id, TransactionType::Expense, asset_id, category_id, amount, transaction_time,
                 remark);
+}
+
+Transaction TransactionService::record_expense(std::int64_t household_id, std::int64_t asset_id,
+    const std::string& category, std::int64_t amount, const std::string& transaction_time,
+    const std::optional<std::string>& remark) {
+  std::optional<std::int64_t> id;
+  if (!strings::is_blank(category)) {
+    std::scoped_lock lock(database_.mutex());
+    const auto name = strings::require_text(category, "category", 64);
+    Statement find(database_, "SELECT id FROM transaction_category WHERE household_id=? AND type='EXPENSE' AND name=?;");
+    find.bind(1, household_id).bind(2, name);
+    if (find.step()) id = find.get_int64(0);
+    else {
+      const auto now = time_util::now_iso8601();
+      Statement add(database_, "INSERT INTO transaction_category (household_id,type,name,sort_order,active,created_at,updated_at) VALUES (?,'EXPENSE',?,0,1,?,?);");
+      add.bind(1, household_id).bind(2, name).bind(3, now).bind(4, now).run();
+      id = database_.last_insert_rowid();
+    }
+  }
+  return record_expense(household_id, asset_id, id, amount, transaction_time, remark);
 }
 
 // 调整：余额直接 +amount（amount 可负）；调整无需分类，故 category 传 nullopt。

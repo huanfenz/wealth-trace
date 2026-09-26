@@ -26,8 +26,11 @@ std::optional<std::string> body_remark(const nlohmann::json& body) {
   return dto::optional_string(body, "remark", 500);
 }
 
-// 读取可选收支分类。
-std::optional<std::string> body_category(const nlohmann::json& body) {
+// 新客户端提交 category_id；保留 category 字符串读取以兼容旧客户端。
+std::optional<std::int64_t> body_category_id(const nlohmann::json& body) {
+  return dto::optional_int64(body, "category_id");
+}
+std::optional<std::string> body_legacy_category(const nlohmann::json& body) {
   return dto::optional_string(body, "category", 64);
 }
 
@@ -75,9 +78,12 @@ void TransactionController::register_routes(crow::SimpleApp& app) {
           const auto body = dto::parse_object(request.body);
           const auto asset_id = dto::require_int64(body, "asset_id");
           const auto amount = dto::require_int64(body, "amount");
-          return dto::to_json(service_.record_income(
-              id, asset_id, body_category(body), amount, body_time(body).value_or(""),
-              body_remark(body)));
+          const auto time = body_time(body).value_or("");
+          const auto remark = body_remark(body);
+          if (const auto category_id = body_category_id(body); category_id.has_value())
+            return dto::to_json(service_.record_income(id, asset_id, category_id, amount, time, remark));
+          return dto::to_json(service_.record_income(id, asset_id,
+              body_legacy_category(body).value_or(""), amount, time, remark));
         });
       });
 
@@ -89,9 +95,12 @@ void TransactionController::register_routes(crow::SimpleApp& app) {
           const auto body = dto::parse_object(request.body);
           const auto asset_id = dto::require_int64(body, "asset_id");
           const auto amount = dto::require_int64(body, "amount");
-          return dto::to_json(service_.record_expense(
-              id, asset_id, body_category(body), amount, body_time(body).value_or(""),
-              body_remark(body)));
+          const auto time = body_time(body).value_or("");
+          const auto remark = body_remark(body);
+          if (const auto category_id = body_category_id(body); category_id.has_value())
+            return dto::to_json(service_.record_expense(id, asset_id, category_id, amount, time, remark));
+          return dto::to_json(service_.record_expense(id, asset_id,
+              body_legacy_category(body).value_or(""), amount, time, remark));
         });
       });
 

@@ -170,6 +170,7 @@ export interface Transaction {
   owner_member_id: number // 属主成员
   asset_id: number // 关联资产
   type: TransactionType
+  category_id: number | null
   category: string | null // 收支分类（可空）
   amount: number // 金额（分），支出/转出存正值，方向由 type 决定
   transfer_group_id: number | null // 转账分组 ID，配对转入/转出（可空）
@@ -178,6 +179,17 @@ export interface Transaction {
   transaction_time: string
   remark: string | null // 备注（可空）
   status: string // 交易状态
+  created_at: string
+  updated_at: string
+}
+
+export interface TransactionCategory {
+  id: number
+  household_id: number
+  type: 'INCOME' | 'EXPENSE'
+  name: string
+  sort_order: number
+  active: boolean
   created_at: string
   updated_at: string
 }

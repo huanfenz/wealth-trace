@@ -27,6 +27,10 @@
           <el-icon><Tickets /></el-icon>
           <span>收支与转账</span>
         </el-menu-item>
+        <el-menu-item index="/categories">
+          <el-icon><CollectionTag /></el-icon>
+          <span>分类管理</span>
+        </el-menu-item>
         <el-menu-item index="/investments">
           <el-icon><Clock /></el-icon>
           <span>定投管理</span>
@@ -34,6 +38,10 @@
         <el-menu-item index="/statistics">
           <el-icon><TrendCharts /></el-icon>
           <span>收支统计</span>
+        </el-menu-item>
+        <el-menu-item index="/data-backup">
+          <el-icon><FolderOpened /></el-icon>
+          <span>数据备份</span>
         </el-menu-item>
       </el-menu>
     </el-aside>

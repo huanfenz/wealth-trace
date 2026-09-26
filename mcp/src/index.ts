@@ -210,7 +210,18 @@ function createServer() {
     }
     return api(`/households/${v.household_id}/transactions?${query}`);
   });
-  const txInput = z.object({ household_id: id, asset_id: id, amount: z.number().int(), category: z.string().max(64).nullable().optional(), transaction_time: transactionTime, remark: transactionRemark });
+  const categoryInput = z.object({ household_id: id, type: z.enum(['INCOME', 'EXPENSE']), name: z.string().min(1).max(64) });
+  registerTool(server, 'list_transaction_categories', { description: '读取家庭的收入或支出分类。', inputSchema: householdId.extend({ type: z.enum(['INCOME', 'EXPENSE']), include_inactive: z.boolean().optional() }), readOnly: true }, (v) => {
+    const query = new URLSearchParams({ type: v.type, include_inactive: String(v.include_inactive ?? false) });
+    return api(`/households/${v.household_id}/categories?${query}`);
+  });
+  registerTool(server, 'create_transaction_category', { description: '新增家庭收入或支出分类。', inputSchema: categoryInput }, (v) => {
+    const { household_id, ...body } = v;
+    return api(`/households/${household_id}/categories`, 'POST', body);
+  });
+  registerTool(server, 'update_transaction_category', { description: '修改分类名称和排序；历史流水会显示新名称。', inputSchema: z.object({ household_id: id, id, name: z.string().min(1).max(64), sort_order: z.number().int().min(0) }) }, (v) => api(`/households/${v.household_id}/categories/${v.id}`, 'PUT', { name: v.name, sort_order: v.sort_order }));
+  registerTool(server, 'set_transaction_category_status', { description: '启用或停用分类；停用不影响历史流水。', inputSchema: z.object({ household_id: id, id, active: z.boolean() }) }, (v) => api(`/households/${v.household_id}/categories/${v.id}/status`, 'PUT', { active: v.active }));
+  const txInput = z.object({ household_id: id, asset_id: id, amount: z.number().int(), category_id: id.nullable().optional(), transaction_time: transactionTime, remark: transactionRemark });
   registerTool(server, 'record_income', { description: '记录收入，amount 使用人民币分。', inputSchema: txInput }, (v) => {
     const { household_id, ...body } = v;
     return api(`/households/${household_id}/transactions/income`, 'POST', body);

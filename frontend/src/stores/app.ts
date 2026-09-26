@@ -1,7 +1,7 @@
 // 全局 Pinia store：缓存家庭、成员、账户、资产与元数据，并提供刷新与名称查询等能力。
 import { defineStore } from 'pinia'
 import * as api from '@/api'
-import type { Account, Asset, Household, Member, Meta } from '@/types'
+import type { Account, Asset, Household, Member, Meta, TransactionCategory } from '@/types'
 
 export const useAppStore = defineStore('app', {
   state: () => ({
@@ -11,6 +11,7 @@ export const useAppStore = defineStore('app', {
     meta: null as Meta | null,          // 全局元数据
     accounts: [] as Account[],          // 账户列表
     assets: [] as Asset[],              // 资产列表
+    categories: [] as TransactionCategory[],
   }),
   getters: {
     // 当前家庭 ID；未初始化时返回 0。
@@ -33,12 +34,12 @@ export const useAppStore = defineStore('app', {
         state.assets.find((asset) => asset.id === id)?.name ?? `#${id}`
     },
     // 收入可选分类（来自元数据）。
-    incomeCategories(state): string[] {
-      return state.meta?.income_categories ?? []
+    incomeCategories(state): TransactionCategory[] {
+      return state.categories.filter((item) => item.type === 'INCOME' && item.active)
     },
     // 支出可选分类（来自元数据）。
-    expenseCategories(state): string[] {
-      return state.meta?.expense_categories ?? []
+    expenseCategories(state): TransactionCategory[] {
+      return state.categories.filter((item) => item.type === 'EXPENSE' && item.active)
     },
   },
   actions: {
@@ -51,6 +52,7 @@ export const useAppStore = defineStore('app', {
       const households = await api.listHouseholds()
       this.household =
         households[0] ?? (await api.createHousehold({ name: '我的家庭' }))
+      await this.refreshCategories()
       await this.refreshMembers()
       this.ready = true
     },
@@ -74,6 +76,14 @@ export const useAppStore = defineStore('app', {
         return
       }
       this.assets = await api.listAssets(this.household.id, {})
+    },
+    async refreshCategories() {
+      if (!this.household) return
+      const [income, expense] = await Promise.all([
+        api.listCategories(this.household.id, 'INCOME'),
+        api.listCategories(this.household.id, 'EXPENSE'),
+      ])
+      this.categories = [...income, ...expense]
     },
     // 并行刷新成员、账户、资产三份缓存。
     async refreshAll() {

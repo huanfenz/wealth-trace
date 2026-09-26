@@ -14,6 +14,7 @@
 #include "model/entities.hpp"
 #include "repository/system_state_repository.hpp"
 #include "service/account_service.hpp"
+#include "service/category_service.hpp"
 #include "service/asset_service.hpp"
 #include "service/daily_maintenance_service.hpp"
 #include "service/household_service.hpp"
@@ -167,6 +168,46 @@ TEST_F(ServiceFixture, IncomeAndExpenseUpdateBalance) {
 
   AssetService assets(database_);
   EXPECT_EQ(assets.get(cash.id).current_balance, 2996500);
+}
+
+// 分类归家庭和收支类型管理；改名同步到历史流水及统计，停用后禁止新记账。
+TEST_F(ServiceFixture, CategoriesAreManagedAndLinkedToTransactions) {
+  CategoryConfig defaults;
+  defaults.income = {"工资"};
+  defaults.expense = {"餐饮"};
+  CategoryService categories(database_, defaults);
+  const auto incomes = categories.list(household_.id, TransactionType::Income);
+  ASSERT_EQ(incomes.size(), 1u);
+  EXPECT_EQ(incomes.front().name, "工资");
+  const auto expenses = categories.list(household_.id, TransactionType::Expense);
+  ASSERT_EQ(expenses.size(), 1u);
+
+  const auto created = categories.create(household_.id, TransactionType::Expense, "宠物医疗");
+  EXPECT_THROW(categories.create(household_.id, TransactionType::Expense, "宠物医疗"), ApiError);
+
+  const Asset cash = make_asset("活期", AssetType::Cash, 100000);
+  TransactionService transactions(database_);
+  const std::string at = business_noon_utc();
+  const auto recorded = transactions.record_expense(household_.id, cash.id, created.id,
+      1234, at, std::nullopt);
+  EXPECT_EQ(recorded.category_id, created.id);
+  EXPECT_EQ(recorded.category, "宠物医疗");
+
+  const auto renamed = categories.update(household_.id, created.id, "宠物健康", 2);
+  EXPECT_EQ(renamed.name, "宠物健康");
+  EXPECT_EQ(transactions.get(recorded.id).category, "宠物健康");
+  StatisticsService statistics(database_);
+  const auto business_at = time_util::utc_to_business(at);
+  const auto period = statistics.period(household_.id, business_at, business_at, std::nullopt);
+  ASSERT_EQ(period.expense_categories.size(), 1u);
+  EXPECT_EQ(period.expense_categories.front().category, "宠物健康");
+  EXPECT_EQ(period.expense_categories.front().amount, 1234);
+
+  categories.set_active(household_.id, created.id, false);
+  EXPECT_THROW(transactions.record_expense(household_.id, cash.id, created.id,
+      100, at, std::nullopt), ApiError);
+  EXPECT_TRUE(categories.set_active(household_.id, created.id, true).active);
+  EXPECT_THROW(categories.update(household_.id + 999, created.id, "越权改名", 0), ApiError);
 }
 
 // 验证转账产生 TRANSFER_OUT + TRANSFER_IN 两条流水、共用同一 transfer_group_id，

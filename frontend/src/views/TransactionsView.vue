@@ -95,8 +95,8 @@
           </el-select>
         </el-form-item>
         <el-form-item v-if="kind === 'income' || kind === 'expense'" label="分类">
-          <el-select v-model="form.category" clearable style="width: 100%">
-            <el-option v-for="c in categories" :key="c" :label="c" :value="c" />
+          <el-select v-model="form.category_id" clearable style="width: 100%">
+            <el-option v-for="c in categories" :key="c.id" :label="c.name" :value="c.id" />
           </el-select>
         </el-form-item>
         <el-form-item :label="kind === 'adjustment' ? '调整金额(元)' : '金额(元)'" required>
@@ -174,7 +174,7 @@ const form = reactive({
   asset_id: 0,
   from_asset_id: 0,
   to_asset_id: 0,
-  category: '',
+  category_id: null as number | null,
   amount_yuan: '',
   transaction_time: '',
   remark: '',
@@ -273,7 +273,7 @@ function openDialog(next: DialogKind) {
   form.asset_id = store.assets[0]?.id ?? 0
   form.from_asset_id = store.assets[0]?.id ?? 0
   form.to_asset_id = store.assets[1]?.id ?? 0
-  form.category = ''
+  form.category_id = null
   form.amount_yuan = ''
   form.transaction_time = ''
   form.remark = ''
@@ -296,7 +296,7 @@ async function submit() {
     if (kind.value === 'income') {
       await recordIncome(store.householdId, {
         asset_id: form.asset_id,
-        category: form.category || null,
+        category_id: form.category_id,
         amount,
         transaction_time: form.transaction_time,
         remark: form.remark,
@@ -304,7 +304,7 @@ async function submit() {
     } else if (kind.value === 'expense') {
       await recordExpense(store.householdId, {
         asset_id: form.asset_id,
-        category: form.category || null,
+        category_id: form.category_id,
         amount,
         transaction_time: form.transaction_time,
         remark: form.remark,

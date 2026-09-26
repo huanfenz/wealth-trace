@@ -179,10 +179,11 @@ std::vector<CategoryAmount> StatisticsRepository::expense_by_category(
     std::int64_t household_id, const std::string& from_time, const std::string& to_time) {
   Statement statement(
       database_,
-      "SELECT COALESCE(category, '未分类'), COALESCE(SUM(amount), 0) FROM \"transaction\" "
-      "WHERE household_id = ? AND status = 'NORMAL' AND type = 'EXPENSE' "
-      "AND transaction_time >= ? AND transaction_time <= ? "
-      "GROUP BY category ORDER BY 2 DESC;");
+      "SELECT COALESCE(c.name, '未分类'), COALESCE(SUM(t.amount), 0) FROM \"transaction\" t "
+      "LEFT JOIN transaction_category c ON c.id = t.category_id "
+      "WHERE t.household_id = ? AND t.status = 'NORMAL' AND t.type = 'EXPENSE' "
+      "AND t.transaction_time >= ? AND t.transaction_time <= ? "
+      "GROUP BY t.category_id, c.name ORDER BY 2 DESC;");
   statement.bind(1, household_id).bind(2, from_time).bind(3, to_time);
   std::vector<CategoryAmount> result;
   while (statement.step()) {
@@ -197,10 +198,11 @@ std::vector<CategoryAmount> StatisticsRepository::income_by_category(
     std::int64_t household_id, const std::string& from_time, const std::string& to_time) {
   Statement statement(
       database_,
-      "SELECT COALESCE(category, '未分类'), COALESCE(SUM(amount), 0) FROM \"transaction\" "
-      "WHERE household_id = ? AND status = 'NORMAL' AND type = 'INCOME' "
-      "AND transaction_time >= ? AND transaction_time <= ? "
-      "GROUP BY category ORDER BY 2 DESC;");
+      "SELECT COALESCE(c.name, '未分类'), COALESCE(SUM(t.amount), 0) FROM \"transaction\" t "
+      "LEFT JOIN transaction_category c ON c.id = t.category_id "
+      "WHERE t.household_id = ? AND t.status = 'NORMAL' AND t.type = 'INCOME' "
+      "AND t.transaction_time >= ? AND t.transaction_time <= ? "
+      "GROUP BY t.category_id, c.name ORDER BY 2 DESC;");
   statement.bind(1, household_id).bind(2, from_time).bind(3, to_time);
   std::vector<CategoryAmount> result;
   while (statement.step()) {

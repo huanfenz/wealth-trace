@@ -142,6 +142,7 @@ struct Transaction {
   std::int64_t owner_member_id = 0; // 所属成员。冗余自动从 Asset 取得，便于按成员过滤/统计
   std::int64_t asset_id = 0;        // 关联资产
   TransactionType type = TransactionType::Expense; // 交易类型
+  std::optional<std::int64_t> category_id;         // 收支分类 id（可空）
   std::optional<std::string> category;             // 分类（可空）
   std::int64_t amount = 0;          // 金额（分）：常规类型恒为正；ADJUSTMENT 时 amount 本身可为负
   std::optional<std::int64_t> transfer_group_id;   // 转账组 id：一次转账拆成
@@ -153,6 +154,18 @@ struct Transaction {
   TransactionStatus status = TransactionStatus::Normal; // 状态：Normal=有效，Void=已作废
   std::string created_at;           // 创建时间，UTC "YYYY-MM-DD HH:MM:SS"
   std::string updated_at;           // 更新时间，UTC "YYYY-MM-DD HH:MM:SS"
+};
+
+// 家庭维护的收支分类。
+struct TransactionCategory {
+  std::int64_t id = 0;
+  std::int64_t household_id = 0;
+  TransactionType type = TransactionType::Expense;
+  std::string name;
+  int sort_order = 0;
+  bool active = true;
+  std::string created_at;
+  std::string updated_at;
 };
 
 }  // namespace wt

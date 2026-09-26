@@ -1,5 +1,6 @@
 // 业务 API 集合：按资源（家庭/成员/账户/资产/交易/统计）封装对后端的请求。
 import { del, get, post, put } from './http'
+import http from './http'
 import type {
   Account,
   Asset,
@@ -16,7 +17,24 @@ import type {
   RecurringInvestmentExecution,
   RecurringInvestmentPlan,
   Transaction,
+  TransactionCategory,
 } from '@/types'
+
+export async function exportDatabase(): Promise<Blob> {
+  const response = await http.get('/database/export', { responseType: 'blob' })
+  return response.data as Blob
+}
+
+export async function importDatabase(file: File): Promise<{ imported: boolean; schema_version: number }> {
+  const response = await http.post('/database/import', file, {
+    headers: { 'Content-Type': 'application/vnd.sqlite3' },
+  })
+  const envelope = response.data
+  if (!envelope || envelope.code !== 0) {
+    throw new Error(envelope?.message || '数据库导入失败')
+  }
+  return envelope.data
+}
 
 export function listInvestmentPlans(householdId: number): Promise<RecurringInvestmentPlan[]> {
   return get<RecurringInvestmentPlan[]>(`/households/${householdId}/investment-plans`)
@@ -46,6 +64,20 @@ export function retryInvestmentExecution(id: number): Promise<RecurringInvestmen
 /** 获取全局元数据（枚举、分类、金额与利率精度等）。 */
 export function getMeta(): Promise<Meta> {
   return get<Meta>('/meta')
+}
+
+export function listCategories(householdId: number, type: 'INCOME' | 'EXPENSE', includeInactive = false): Promise<TransactionCategory[]> {
+  const query = new URLSearchParams({ type, include_inactive: String(includeInactive) })
+  return get<TransactionCategory[]>(`/households/${householdId}/categories?${query}`)
+}
+export function createCategory(householdId: number, body: { type: 'INCOME' | 'EXPENSE'; name: string }): Promise<TransactionCategory> {
+  return post<TransactionCategory>(`/households/${householdId}/categories`, body)
+}
+export function updateCategory(householdId: number, id: number, body: { name: string; sort_order: number }): Promise<TransactionCategory> {
+  return put<TransactionCategory>(`/households/${householdId}/categories/${id}`, body)
+}
+export function setCategoryActive(householdId: number, id: number, active: boolean): Promise<TransactionCategory> {
+  return put<TransactionCategory>(`/households/${householdId}/categories/${id}/status`, { active })
 }
 
 // --- households（家庭） ----------------------------------------------------

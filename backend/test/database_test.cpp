@@ -1,7 +1,9 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <filesystem>
 #include <string>
+#include <chrono>
 
 #include "common/error.hpp"
 #include "database/database.hpp"
@@ -34,15 +36,55 @@ class DatabaseTest : public ::testing::Test {
   Database database_;
 };
 
-// 验证迁移执行后版本号为 10、应用记录 10 条，且重复执行幂等（不会重复应用）。
+// 验证迁移执行后版本号与当前迁移集一致，且重复执行幂等（不会重复应用）。
 TEST_F(DatabaseTest, MigrationCreatesSchemaAndIsIdempotent) {
   MigrationRunner runner(database_);
-  EXPECT_EQ(runner.current_version(), 10);
-  EXPECT_EQ(runner.applied().size(), 10u);
+  EXPECT_EQ(runner.current_version(), 12);
+  EXPECT_EQ(runner.applied().size(), 12u);
 
   // Running again must not re-apply anything.
   const auto applied_again = runner.run(migrations_dir());
   EXPECT_TRUE(applied_again.empty());
+}
+
+// 从旧 schema 11 升级到 12 时，旧的自定义收支分类会建档并关联到原流水。
+TEST(DatabaseMigrationTest, ExistingTransactionCategoriesAreBackfilled) {
+  namespace fs = std::filesystem;
+  const auto suffix = std::chrono::steady_clock::now().time_since_epoch().count();
+  const fs::path old_dir = fs::temp_directory_path() / ("wealth_trace_migrations_" + std::to_string(suffix));
+  fs::create_directories(old_dir);
+  struct Cleanup { fs::path path; ~Cleanup() { std::error_code ec; fs::remove_all(path, ec); } } cleanup{old_dir};
+  const fs::path source(migrations_dir());
+  for (const auto& entry : fs::directory_iterator(source)) {
+    if (entry.path().extension() == ".sql" && entry.path().filename().string() < "012_")
+      fs::copy_file(entry.path(), old_dir / entry.path().filename());
+  }
+
+  Database database;
+  database.open(":memory:");
+  MigrationRunner runner(database);
+  runner.run(old_dir.string());
+  database.exec("PRAGMA foreign_keys = OFF;");
+  const auto now = time_util::now_iso8601();
+  Statement household(database, "INSERT INTO household (id, name, created_at, updated_at) VALUES (1, '迁移家庭', ?, ?);");
+  household.bind(1, now).bind(2, now).run();
+  Statement old_transaction(database,
+      "INSERT INTO \"transaction\" (household_id, owner_member_id, asset_id, type, category, amount, "
+      "transaction_time, created_at, updated_at) VALUES (1, 1, 1, 'EXPENSE', '宠物医疗', 1234, ?, ?, ?);");
+  old_transaction.bind(1, now).bind(2, now).bind(3, now).run();
+  database.exec("PRAGMA foreign_keys = ON;");
+
+  const auto applied = runner.run(migrations_dir());
+  ASSERT_EQ(applied.size(), 1u);
+  EXPECT_EQ(applied.front(), 12);
+  Statement migrated(database,
+      "SELECT t.category_id, c.name, c.household_id, c.type FROM \"transaction\" t "
+      "JOIN transaction_category c ON c.id = t.category_id WHERE t.id = 1;");
+  ASSERT_TRUE(migrated.step());
+  EXPECT_GT(migrated.get_int64(0), 0);
+  EXPECT_EQ(migrated.get_text(1), "宠物医疗");
+  EXPECT_EQ(migrated.get_int64(2), 1);
+  EXPECT_EQ(migrated.get_text(3), "EXPENSE");
 }
 
 // 验证迁移创建了家庭、成员、账户、资产、各明细表以及交易这几张核心表。
@@ -51,7 +93,8 @@ TEST_F(DatabaseTest, AllCoreTablesExist) {
                           "asset",           "term_deposit_detail", "stock_fund_detail",
                           "bond_fund_detail", "flexible_term_detail",
                           "commercial_pension_detail", "insurance_detail",
-                          "transaction",     "system_state"};
+                          "transaction", "transaction_category", "household_category_seed",
+                          "system_state"};
   for (const char* table : tables) {
     Statement statement(
         database_,

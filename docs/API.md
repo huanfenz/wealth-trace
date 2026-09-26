@@ -31,6 +31,16 @@
 
 ---
 
+## 数据库备份
+
+### `GET /api/database/export`
+
+下载包含在线 WAL 已提交数据的一致 SQLite 快照，响应为 `application/vnd.sqlite3`，文件名为 `wealth-trace.db`。
+
+### `POST /api/database/import`
+
+请求体为 SQLite `.db` 文件原始字节（`Content-Type: application/vnd.sqlite3`），最大 100 MiB。服务端校验数据库完整性、外键和迁移版本；旧版本会先迁移。导入成功后整体替换当前数据库，并在数据库目录的 `backups/` 留存覆盖前快照。
+
 ## 元数据
 
 ### `GET /api/health`
@@ -65,6 +75,8 @@
 }
 ```
 
+`income_categories` / `expense_categories` 是配置文件默认值的兼容字段。运行中的家庭分类请使用下方分类管理 API。
+
 ---
 
 ## 家庭 Household
@@ -77,6 +89,34 @@
 
 ```json
 { "name": "我的家庭" }
+```
+
+## 收支分类
+
+分类按家庭和收支类型隔离。查询分类时会把配置中的默认值补入该家庭；停用分类仍保留历史流水。
+
+### `GET /api/households/{id}/categories?type=INCOME&include_inactive=false`
+
+`type` 必须是 `INCOME` 或 `EXPENSE`。默认只返回启用分类；管理页可传 `include_inactive=true`。
+
+### `POST /api/households/{id}/categories`
+
+```json
+{ "type": "EXPENSE", "name": "宠物" }
+```
+
+### `PUT /api/households/{household_id}/categories/{id}`
+
+```json
+{ "name": "宠物用品", "sort_order": 3 }
+```
+
+改名会同步更新历史流水显示名称和统计分组。
+
+### `PUT /api/households/{household_id}/categories/{id}/status`
+
+```json
+{ "active": false }
 ```
 
 ### `GET /api/households/{id}` / `PUT /api/households/{id}`
@@ -426,13 +466,13 @@
 ### `POST /api/households/{id}/transactions/income`
 
 ```json
-{ "asset_id": 1, "category": "工资", "amount": 1000000, "transaction_time": "", "remark": "" }
+{ "asset_id": 1, "category_id": 1, "amount": 1000000, "transaction_time": "", "remark": "" }
 ```
 
 ### `POST /api/households/{id}/transactions/expense`
 
 ```json
-{ "asset_id": 1, "category": "餐饮", "amount": 3500 }
+{ "asset_id": 1, "category_id": 2, "amount": 3500 }
 ```
 
 ### `POST /api/households/{id}/transactions/adjustment`

@@ -36,6 +36,12 @@ const router = createRouter({
       meta: { title: '收支与转账' },
     },
     {
+      path: '/categories',
+      name: 'categories',
+      component: () => import('@/views/CategoriesView.vue'),
+      meta: { title: '收支分类' },
+    },
+    {
       path: '/investments',
       name: 'investments',
       component: () => import('@/views/RecurringInvestmentsView.vue'),
@@ -46,6 +52,12 @@ const router = createRouter({
       name: 'statistics',
       component: () => import('@/views/StatisticsView.vue'),
       meta: { title: '收支统计' },
+    },
+    {
+      path: '/data-backup',
+      name: 'data-backup',
+      component: () => import('@/views/DatabaseBackupView.vue'),
+      meta: { title: '数据备份' },
     },
   ],
 })

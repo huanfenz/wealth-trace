@@ -14,9 +14,9 @@ namespace wt {
 namespace {
 
 // 行映射：列下标必须与 kSelectColumns 的顺序严格一致。
-// 0=id 1=household_id 2=owner_member_id 3=asset_id 4=type 5=category 6=amount
-// 7=transfer_group_id 8=balance_before 9=balance_after 10=transaction_time
-// 11=remark 12=status 13=created_at 14=updated_at
+// 0=id 1=household_id 2=owner_member_id 3=asset_id 4=type 5=category_id 6=category 7=amount
+// 8=transfer_group_id 9=balance_before 10=balance_after 11=transaction_time
+// 12=remark 13=status 14=created_at 15=updated_at
 // 金额单位：分。枚举解析失败回退 Adjustment / Normal。
 Transaction map_transaction(Statement& statement) {
   Transaction transaction;
@@ -26,23 +26,24 @@ Transaction map_transaction(Statement& statement) {
   transaction.asset_id = statement.get_int64(3);
   transaction.type =
       parse_transaction_type(statement.get_text(4)).value_or(TransactionType::Adjustment);
-  transaction.category = statement.get_optional_text(5);
-  transaction.amount = statement.get_int64(6);
-  transaction.transfer_group_id = statement.get_optional_int64(7);
-  transaction.balance_before = statement.get_optional_int64(8);
-  transaction.balance_after = statement.get_optional_int64(9);
-  transaction.transaction_time = statement.get_text(10);
-  transaction.remark = statement.get_optional_text(11);
+  transaction.category_id = statement.get_optional_int64(5);
+  transaction.category = statement.get_optional_text(6);
+  transaction.amount = statement.get_int64(7);
+  transaction.transfer_group_id = statement.get_optional_int64(8);
+  transaction.balance_before = statement.get_optional_int64(9);
+  transaction.balance_after = statement.get_optional_int64(10);
+  transaction.transaction_time = statement.get_text(11);
+  transaction.remark = statement.get_optional_text(12);
   transaction.status =
-      parse_transaction_status(statement.get_text(12)).value_or(TransactionStatus::Normal);
-  transaction.created_at = statement.get_text(13);
-  transaction.updated_at = statement.get_text(14);
+      parse_transaction_status(statement.get_text(13)).value_or(TransactionStatus::Normal);
+  transaction.created_at = statement.get_text(14);
+  transaction.updated_at = statement.get_text(15);
   return transaction;
 }
 
 // SELECT 列顺序，与 map_transaction 的下标一一对应。
 constexpr const char* kSelectColumns =
-    "id, household_id, owner_member_id, asset_id, type, category, amount, "
+    "id, household_id, owner_member_id, asset_id, type, category_id, category, amount, "
     "transfer_group_id, balance_before, balance_after, transaction_time, remark, status, "
     "created_at, updated_at";
 
@@ -99,23 +100,24 @@ void apply_bindings(Statement& statement,
 std::int64_t TransactionRepository::create(const Transaction& transaction) {
   Statement statement(
       database_,
-      "INSERT INTO \"transaction\" (household_id, owner_member_id, asset_id, type, category, "
+      "INSERT INTO \"transaction\" (household_id, owner_member_id, asset_id, type, category_id, category, "
       "amount, transfer_group_id, balance_before, balance_after, transaction_time, "
-      "remark, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);");
+      "remark, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);");
   statement.bind(1, transaction.household_id)
       .bind(2, transaction.owner_member_id)
       .bind(3, transaction.asset_id)
       .bind(4, std::string(to_string(transaction.type)))
-      .bind_optional_text(5, transaction.category)
-      .bind(6, transaction.amount)
-      .bind_optional_int64(7, transaction.transfer_group_id)
-      .bind_optional_int64(8, transaction.balance_before)
-      .bind_optional_int64(9, transaction.balance_after)
-      .bind(10, transaction.transaction_time)
-      .bind_optional_text(11, transaction.remark)
-      .bind(12, std::string(to_string(transaction.status)))
-      .bind(13, transaction.created_at)
-      .bind(14, transaction.updated_at)
+      .bind_optional_int64(5, transaction.category_id)
+      .bind_optional_text(6, transaction.category)
+      .bind(7, transaction.amount)
+      .bind_optional_int64(8, transaction.transfer_group_id)
+      .bind_optional_int64(9, transaction.balance_before)
+      .bind_optional_int64(10, transaction.balance_after)
+      .bind(11, transaction.transaction_time)
+      .bind_optional_text(12, transaction.remark)
+      .bind(13, std::string(to_string(transaction.status)))
+      .bind(14, transaction.created_at)
+      .bind(15, transaction.updated_at)
       .run();
   return database_.last_insert_rowid();
 }

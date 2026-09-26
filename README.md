@@ -80,6 +80,8 @@ wealth-trace/
 └── scripts/                    # 冒烟测试脚本
 ```
 
+网页左侧“数据备份”可下载完整 SQLite 数据库，或导入备份并整体恢复。导入会先验证完整性和外键，自动迁移旧版备份，并在数据库目录的 `backups/` 保存覆盖前快照。上传文件上限为 100 MiB。
+
 ---
 
 ## 3. 依赖与环境
@@ -117,6 +119,36 @@ bash scripts/run.sh prod
 也可以在模式后传入自定义配置文件：`bash scripts/run.sh prod /path/to/config.json`。
 首次运行时，脚本会在缺少 `frontend/node_modules` 的情况下自动安装前端依赖。开发模式访问 `http://127.0.0.1:5173`；生产模式访问 `http://127.0.0.1:8080`。按 `Ctrl-C` 停止服务。
 启动前脚本会自动检测并停止仍占用后端/Vite 端口的旧进程，避免新服务因端口被占而启动失败。
+
+### ARM64 交叉编译与部署
+
+推荐使用 x86_64 Ubuntu 22.04 开发机。先准备 Node.js ≥ 18、npm、Ninja、rsync 和 Meson ≥ 1.3（Ubuntu 22.04 自带的 Meson 0.61 不够新）：
+
+```bash
+sudo apt-get install ninja-build python3-pip nodejs npm rsync
+python3 -m pip install --user 'meson>=1.3'
+```
+
+若系统没有 ARM64 交叉编译器，首次执行构建脚本会用 `apt download` 将 Ubuntu 22.04 工具链装入仓库内的 `.toolchains/arm64/`，不需要 sudo；后续构建复用它。也可以提前用系统包安装 `gcc-aarch64-linux-gnu g++-aarch64-linux-gnu libc6-dev-arm64-cross`。首次构建缺少前端依赖时，脚本会运行 `npm ci`。
+
+目标服务器需要 ARM64 Linux、systemd、Python 3、`curl`、`tar`、`rsync`，以及可免密登录的 root（或可执行 `sudo -n` 的账号）。前后端都在本机构建，目标机不需要 Node.js、Meson 或 C++ 编译器。交叉编译器使用 Ubuntu 22.04 的 ARM64 运行库；目标机应使用兼容的 Linux/运行库版本，当前目标机为 ARM64 Ubuntu 22.04。
+
+```bash
+# 只构建：生成 dist/wealth-trace-linux-arm64.tar.gz
+bash scripts/build-arm64.sh
+
+# 一键构建并部署到默认目标 root@192.168.50.142:8081
+bash scripts/deploy-arm64.sh
+
+# 使用已有构建包部署到指定目标
+bash scripts/deploy-arm64.sh --skip-build --host 192.168.50.142 --user root --port 8081
+```
+
+若通过域名连接服务器，另用 `--bind` 指定服务器上的 IPv4 监听地址；例如 `--host my-server.local --bind 192.168.50.142`。
+
+脚本在目标机的 `/opt/wealth-trace/releases/` 保存每次发布的完整后端程序、前端静态文件和数据库迁移文件；`/opt/wealth-trace/current` 指向当前版本。systemd 服务使用专用 `wealthtrace` 账号，数据库保存在 `/var/lib/wealth-trace/caiji.db`，服务器配置保存在 `/etc/wealth-trace/config.json`。每次发布前会将现有 SQLite 数据库备份到 `/var/lib/wealth-trace/backups/`，启动后检查健康接口；启动失败会恢复之前的程序及服务配置。数据库迁移一旦执行，旧程序可能不兼容新结构，此时应结合备份处理数据回退。
+
+查看服务状态：`ssh root@192.168.50.142 systemctl status wealth-trace.service`。默认访问地址：`http://192.168.50.142:8081/`。当前应用没有登录鉴权，请只在可信网络内开放此端口。
 
 ---
 
@@ -224,8 +256,10 @@ bash scripts/static_smoke.sh     # 验证后端静态托管前端
 | `frontend.enabled` | 是否托管前端构建产物 | `true` |
 | `frontend.dir` | 前端构建目录 | `frontend/dist` |
 | `business_timezone` | 业务时区（IANA 名称），影响业务日期与每日维护调度 | `Asia/Shanghai` |
-| `categories.expense` | 默认支出分类 | 餐饮/交通/... |
-| `categories.income` | 默认收入分类 | 工资/奖金/... |
+| `categories.expense` | 新家庭的初始支出分类 | 餐饮/交通/... |
+| `categories.income` | 新家庭的初始收入分类 | 工资/奖金/... |
+
+分类保存于数据库，可在应用的“分类管理”页面新增、改名和停用。配置文件分类仅作为初始模板。
 
 配置文件路径可通过命令行参数或环境变量 `WEALTH_TRACE_CONFIG` 指定：
 
@@ -273,6 +307,8 @@ WEALTH_TRACE_CONFIG=/path/to/config.json ./build/backend/wealth-trace
 | --- | --- | --- |
 | GET | `/api/health` | 健康检查 |
 | GET | `/api/meta` | 枚举与默认分类 |
+| GET | `/api/database/export` | 下载完整 SQLite 数据库备份 |
+| POST | `/api/database/import` | 校验并整体导入数据库备份（最大 100 MiB） |
 | GET/POST | `/api/households` | 家庭列表/创建 |
 | GET/PUT | `/api/households/{id}` | 家庭详情/更新 |
 | GET/POST | `/api/households/{id}/members` | 成员列表/创建 |

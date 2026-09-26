@@ -1,5 +1,8 @@
 # Build output
 /build/
+/build-arm64/
+/dist/
+/.toolchains/
 /frontend/dist/
 /frontend/node_modules/
 /mcp/node_modules/

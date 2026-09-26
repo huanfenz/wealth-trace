@@ -298,6 +298,7 @@ nlohmann::json to_json(const Transaction& transaction) {
           {"owner_member_id", transaction.owner_member_id},
           {"asset_id", transaction.asset_id},
           {"type", std::string(to_string(transaction.type))},
+          {"category_id", optional_int(transaction.category_id)},
           {"category", optional_text(transaction.category)},
           {"amount", transaction.amount},
           {"transfer_group_id", optional_int(transaction.transfer_group_id)},
