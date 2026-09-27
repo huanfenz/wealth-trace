@@ -17,6 +17,10 @@ for command_name in meson ninja npm node tar aarch64-linux-gnu-gcc aarch64-linux
     exit 1
   fi
 done
+if ! node -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 20 ? 0 : 1)'; then
+  printf 'Building the MCP server requires Node.js 20 or newer.\n' >&2
+  exit 1
+fi
 
 if [[ ! -x "${project_dir}/frontend/node_modules/.bin/vite" ||
       ! -x "${project_dir}/frontend/node_modules/.bin/vue-tsc" ]]; then
@@ -34,14 +38,22 @@ else
 fi
 meson compile -C "${build_dir}" -j "${ARM64_JOBS:-2}"
 (cd "${project_dir}/frontend" && npm run build)
+(cd "${project_dir}/mcp" && npm ci --no-audit --no-fund && npm run build)
 
 stage_dir="$(mktemp -d)"
 trap 'rm -rf -- "${stage_dir}"' EXIT
-install -d "${stage_dir}/bin" "${stage_dir}/frontend" "${project_dir}/dist"
+install -d "${stage_dir}/bin" "${stage_dir}/frontend" "${stage_dir}/mcp" "${project_dir}/dist"
 install -m 755 "${build_dir}/backend/wealth-trace" "${stage_dir}/bin/wealth-trace"
 cp -a "${project_dir}/frontend/dist" "${stage_dir}/frontend/dist"
 cp -a "${project_dir}/migrations" "${stage_dir}/migrations"
+cp -a "${project_dir}/docs" "${stage_dir}/docs"
+cp -a "${project_dir}/mcp/dist" "${stage_dir}/mcp/dist"
+cp "${project_dir}/mcp/package.json" "${project_dir}/mcp/package-lock.json" "${stage_dir}/mcp/"
+cp "${project_dir}/README.md" "${stage_dir}/README.md"
 cp "${project_dir}/config.json" "${stage_dir}/config.json"
+# Install only runtime dependencies into the archive while the build machine
+# still has npm access. The target needs Node.js, but no npm or registry access.
+npm ci --prefix "${stage_dir}/mcp" --omit=dev --offline --no-audit --no-fund
 tar -C "${stage_dir}" -czf "${archive}.tmp" .
 mv -f "${archive}.tmp" "${archive}"
 printf 'ARM64 release: %s\n' "${archive}"

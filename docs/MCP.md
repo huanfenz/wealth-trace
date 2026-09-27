@@ -2,7 +2,30 @@
 
 项目提供本地 stdio MCP 服务，Agent 可通过具名工具操作现有 REST API，并读取只读资源或使用提示模板。MCP 服务不会自行启动后端；使用前先按 README 启动财迹后端。
 
-## 构建
+## 使用 ARM64 部署包
+
+发布包已包含 `mcp/dist/`、生产用 `mcp/node_modules/`、`README.md` 和 `docs/`。服务器上的文档位于 `/opt/wealth-trace/current/docs/MCP.md`，MCP 入口位于 `/opt/wealth-trace/current/mcp/dist/index.js`。目标机需要 Node.js 20 或更高版本，无需安装 npm、下载源码或重新构建 MCP。
+
+在 MCP 客户端中配置 stdio 服务，使用实际后端地址替换示例 API 地址。下例适用于支持 `mcpServers` 的客户端；其他客户端请使用对应的配置格式：
+
+```json
+{
+  "mcpServers": {
+    "wealth-trace": {
+      "command": "node",
+      "args": ["/opt/wealth-trace/current/mcp/dist/index.js"],
+      "cwd": "/opt/wealth-trace/current",
+      "env": {
+        "WEALTH_TRACE_API_URL": "http://192.0.2.10:8081/api"
+      }
+    }
+  }
+}
+```
+
+`192.0.2.10` 是文档示例地址。实际地址和端口见 `/etc/wealth-trace/config.json` 的 `server.host`、`server.port`；如果后端监听 `0.0.0.0` 且 MCP 在同一台机器上，可改用 `127.0.0.1`。配置后重启或重载 MCP 客户端，并调用只读工具 `check_backend` 验证连接。
+
+## 从源码构建
 
 需要 Node.js 20 或更高版本。
 
@@ -15,7 +38,7 @@ npm start
 
 MCP 协议消息独占 stdout，启动错误和运行诊断写入 stderr。进程应由 MCP Host 启动并保持运行。
 
-## Agent 配置
+## 源码目录中的 Agent 配置
 
 下面示例适用于支持 `mcpServers` 配置的客户端。将工作目录改为本项目的绝对路径：
 

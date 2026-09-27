@@ -57,7 +57,11 @@ trap rollback ERR
 
 tar --no-same-owner -xzf "${archive}" -C "${stage_dir}"
 chmod 755 "${stage_dir}"
-[[ -x "${stage_dir}/bin/wealth-trace" && -f "${stage_dir}/frontend/dist/index.html" && -d "${stage_dir}/migrations" ]] || {
+[[ -x "${stage_dir}/bin/wealth-trace" && -f "${stage_dir}/frontend/dist/index.html" &&
+   -d "${stage_dir}/migrations" && -f "${stage_dir}/README.md" &&
+   -f "${stage_dir}/docs/MCP.md" && -f "${stage_dir}/mcp/dist/index.js" &&
+   -f "${stage_dir}/mcp/node_modules/@modelcontextprotocol/server/package.json" &&
+   -f "${stage_dir}/mcp/node_modules/zod/package.json" ]] || {
   printf 'Incomplete release archive.\n' >&2
   exit 1
 }
