@@ -31,7 +31,7 @@ MCP 协议消息独占 stdout，启动错误和运行诊断写入 stderr。进�
 }
 ```
 
-默认 API 地址是 `http://127.0.0.1:8080/api`。如后端使用其他地址，可在 MCP Host 的进程环境中设置 `WEALTH_TRACE_API_URL`，值应包含 `/api`，例如 `http://127.0.0.1:8080/api`。
+默认 API 地址是 `http://127.0.0.1:8080/api`。如果后端部署在其他地址或端口，先查看后端配置中的 `server.host` 和 `server.port`（ARM64 部署时配置文件位于 `/etc/wealth-trace/config.json`），再在 MCP Host 启动 MCP 进程的环境中设置 `WEALTH_TRACE_API_URL=http://<可访问的主机地址>:<端口>/api`。地址末尾必须包含 `/api`。例如应用监听 `192.0.2.10:8081` 时，设置为 `http://192.0.2.10:8081/api`；这里的 IP 是文档示例，需替换为实际地址。如果后端监听 `0.0.0.0`，同机运行的 MCP 可连接 `127.0.0.1`。
 
 当前后端没有认证机制；此 stdio 服务面向本机 Agent，连接本机后端。
 

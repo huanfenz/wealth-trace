@@ -3,7 +3,7 @@
 set -Eeuo pipefail
 
 project_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
-host='192.168.50.142'
+host=''
 user='root'
 port='8081'
 bind_host=''
@@ -15,7 +15,7 @@ usage() {
 Usage: bash scripts/deploy-arm64.sh [--host ADDRESS] [--user USER] [--port PORT] [--bind IPV4] [--skip-build]
 
 Builds the ARM64 backend and frontend locally, then deploys by SSH.
-Defaults: root@192.168.50.142, application port 8081.
+--host is required. Defaults: root user, application port 8081.
 --skip-build uploads the existing dist/wealth-trace-linux-arm64.tar.gz.
 --bind sets the interface address for the application; it defaults to --host when --host is IPv4.
 SSH key authentication and sudo/root access on the target are required.
@@ -39,6 +39,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+[[ -n "${host}" ]] || { printf 'Missing required --host ADDRESS\n' >&2; usage >&2; exit 2; }
 [[ "${host}" =~ ^[a-zA-Z0-9.-]+$ ]] || { printf 'Invalid host\n' >&2; exit 2; }
 [[ "${user}" =~ ^[a-zA-Z_][a-zA-Z0-9_-]*$ ]] || { printf 'Invalid user\n' >&2; exit 2; }
 [[ "${port}" =~ ^[0-9]{1,5}$ ]] || { printf 'Invalid port\n' >&2; exit 2; }

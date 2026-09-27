@@ -131,24 +131,30 @@ python3 -m pip install --user 'meson>=1.3'
 
 若系统没有 ARM64 交叉编译器，首次执行构建脚本会用 `apt download` 将 Ubuntu 22.04 工具链装入仓库内的 `.toolchains/arm64/`，不需要 sudo；后续构建复用它。也可以提前用系统包安装 `gcc-aarch64-linux-gnu g++-aarch64-linux-gnu libc6-dev-arm64-cross`。首次构建缺少前端依赖时，脚本会运行 `npm ci`。
 
-目标服务器需要 ARM64 Linux、systemd、Python 3、`curl`、`tar`、`rsync`，以及可免密登录的 root（或可执行 `sudo -n` 的账号）。前后端都在本机构建，目标机不需要 Node.js、Meson 或 C++ 编译器。交叉编译器使用 Ubuntu 22.04 的 ARM64 运行库；目标机应使用兼容的 Linux/运行库版本，当前目标机为 ARM64 Ubuntu 22.04。
+目标服务器需要 ARM64 Linux、systemd、Python 3、`curl`、`tar`、`rsync`，以及可免密登录的 root（或可执行 `sudo -n` 的账号）。前后端都在本机构建，目标机不需要 Node.js、Meson 或 C++ 编译器。交叉编译器使用 Ubuntu 22.04 的 ARM64 运行库；目标机应使用兼容的 Linux/运行库版本。
 
 ```bash
 # 只构建：生成 dist/wealth-trace-linux-arm64.tar.gz
 bash scripts/build-arm64.sh
 
-# 一键构建并部署到默认目标 root@192.168.50.142:8081
-bash scripts/deploy-arm64.sh
+# 一键构建并部署：将示例 IP 换成自己的服务器地址
+bash scripts/deploy-arm64.sh --host 192.0.2.10 --user root --port 8081
 
 # 使用已有构建包部署到指定目标
-bash scripts/deploy-arm64.sh --skip-build --host 192.168.50.142 --user root --port 8081
+bash scripts/deploy-arm64.sh --skip-build --host 192.0.2.10 --user root --port 8081
 ```
 
-若通过域名连接服务器，另用 `--bind` 指定服务器上的 IPv4 监听地址；例如 `--host my-server.local --bind 192.168.50.142`。
+`--host` 必填，是 SSH 连接地址；当它是 IPv4 地址时，应用默认监听该地址。用 `--user` 修改 SSH 用户，用 `--port` 修改应用端口（不影响 SSH 的 22 端口）。若通过域名连接服务器，另用 `--bind` 指定服务器上的 IPv4 监听地址，例如 `--host my-server.example --bind 192.0.2.10`。示例中的 `192.0.2.10` 是文档专用地址，执行前必须替换。
 
 脚本在目标机的 `/opt/wealth-trace/releases/` 保存每次发布的完整后端程序、前端静态文件和数据库迁移文件；`/opt/wealth-trace/current` 指向当前版本。systemd 服务使用专用 `wealthtrace` 账号，数据库保存在 `/var/lib/wealth-trace/caiji.db`，服务器配置保存在 `/etc/wealth-trace/config.json`。每次发布前会将现有 SQLite 数据库备份到 `/var/lib/wealth-trace/backups/`，启动后检查健康接口；启动失败会恢复之前的程序及服务配置。数据库迁移一旦执行，旧程序可能不兼容新结构，此时应结合备份处理数据回退。
 
-查看服务状态：`ssh root@192.168.50.142 systemctl status wealth-trace.service`。默认访问地址：`http://192.168.50.142:8081/`。当前应用没有登录鉴权，请只在可信网络内开放此端口。
+部署后可用 `ssh <SSH用户>@<服务器地址> systemctl status wealth-trace.service` 查看状态，并通过 `http://<监听地址>:<应用端口>/` 访问。服务器实际监听地址和端口保存在 `/etc/wealth-trace/config.json` 的 `server.host`、`server.port` 中；修改部署目标时，重新运行脚本并传入相应的 `--host`、`--bind`、`--port`。当前应用没有登录鉴权，请只在可信网络内开放此端口。
+
+### 让服务器上的 Agent 安装 MCP
+
+部署包不包含 `docs/` 和 `mcp/`。可将下面的提示词发给运行在目标服务器上的 Agent；如果仓库是私有的，需先确保该 Agent 有 GitHub 访问权限。
+
+> 请为你所在的 MCP 客户端安装并配置 wealth-trace MCP。先阅读 [在线接入文档](https://github.com/huanfenz/wealth-trace/blob/main/docs/MCP.md)，并从 [项目仓库](https://github.com/huanfenz/wealth-trace) 获取 `mcp/` 源码；服务器的 `/opt/wealth-trace/current` 部署目录不包含这些文件。确认 Node.js 版本至少为 20，在 `mcp/` 目录运行 `npm ci` 和 `npm run build`。根据你使用的 MCP 客户端，将它配置为通过 `node` 启动构建后的 `mcp/dist/index.js`，使用实际的绝对路径。读取服务器 `/etc/wealth-trace/config.json` 中的 `server.host` 和 `server.port`，将 MCP 进程的 `WEALTH_TRACE_API_URL` 设置为对应的 `http://<可访问的主机地址>:<端口>/api`；若监听地址为 `0.0.0.0`，且 MCP 与后端在同一台机器上，可用 `127.0.0.1`。重启或重载 MCP 客户端后，调用只读工具 `check_backend` 验证连接，报告配置位置、使用的 API 地址和验证结果。验证期间不要修改财迹业务数据；如果仓库无法访问，请报告访问错误。
 
 ---
 
