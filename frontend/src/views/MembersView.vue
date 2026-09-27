@@ -8,7 +8,22 @@
       <div class="spacer" />
     </div>
 
-    <el-card shadow="never">
+    <div class="mobile-records">
+      <el-empty v-if="!loading && store.members.length === 0" description="暂无成员" />
+      <el-card v-for="row in store.members" :key="row.id" shadow="never" class="mobile-record-card">
+        <div class="mobile-record-heading">
+          <el-checkbox :model-value="selectedMembers.some((item) => item.id === row.id)" aria-label="选择成员" @change="toggleMemberSelection(row, $event)" />
+          <div class="mobile-record-title">{{ row.name }}</div>
+        </div>
+        <div class="mobile-record-fields">
+          <div class="mobile-record-field"><div class="mobile-record-label">角色</div><el-tag :type="row.role === 'OWNER' ? 'success' : 'info'" size="small">{{ memberRoleLabels[row.role as MemberRole] }}</el-tag></div>
+          <div class="mobile-record-field"><div class="mobile-record-label">状态</div><el-tag :type="row.status === 'ACTIVE' ? 'success' : 'info'" size="small">{{ memberStatusLabels[row.status as MemberStatus] }}</el-tag></div>
+        </div>
+        <div class="mobile-record-actions"><el-button link type="primary" @click="openEdit(row)">编辑</el-button></div>
+      </el-card>
+    </div>
+
+    <el-card shadow="never" class="desktop-records">
       <el-table :data="store.members" v-loading="loading" @selection-change="selectedMembers = $event">
         <el-table-column type="selection" width="48" />
         <el-table-column prop="name" label="姓名" />
@@ -85,6 +100,12 @@ const form = reactive({
   status: 'ACTIVE' as MemberStatus,
 })
 
+function toggleMemberSelection(member: Member, checked: string | number | boolean) {
+  const selected = selectedMembers.value.some((item) => item.id === member.id)
+  if (checked && !selected) selectedMembers.value = [...selectedMembers.value, member]
+  if (!checked && selected) selectedMembers.value = selectedMembers.value.filter((item) => item.id !== member.id)
+}
+
 // 打开「新增」弹窗并重置表单为默认值。
 function openCreate() {
   editing.value = null
@@ -118,6 +139,7 @@ async function save() {
     }
     dialogVisible.value = false
     await store.refreshMembers()
+    selectedMembers.value = []
     ElMessage.success('已保存')
   } catch (error) {
     ElMessage.error((error as Error).message)
@@ -134,6 +156,7 @@ async function bulkPause() {
     name: member.name, role: member.role, status: 'INACTIVE',
   })))
   await store.refreshMembers()
+  selectedMembers.value = []
   const failed = results.filter((result) => result.status === 'rejected').length
   ElMessage[failed ? 'warning' : 'success'](`批量停用完成：成功 ${targets.length - failed} 位，失败 ${failed} 位`)
 }

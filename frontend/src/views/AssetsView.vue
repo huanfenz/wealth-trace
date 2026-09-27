@@ -16,7 +16,35 @@
       <div class="spacer" />
     </div>
 
-    <el-card shadow="never">
+    <div class="mobile-records">
+      <el-empty v-if="!loading && assets.length === 0" description="暂无资产" />
+      <el-card v-for="row in assets" :key="row.id" shadow="never" class="mobile-record-card">
+        <div class="mobile-record-heading">
+          <el-checkbox :model-value="selectedAssets.some((item) => item.id === row.id)" aria-label="选择资产" @change="toggleAssetSelection(row, $event)" />
+          <div class="mobile-record-title">{{ row.name }}<div class="mobile-record-meta">{{ store.memberName(row.owner_member_id) }} · {{ store.accountName(row.account_id) }}</div></div>
+          <el-tag :type="row.status === 'ACTIVE' ? 'success' : 'info'" size="small">{{ assetStatusLabels[row.status as AssetStatus] }}</el-tag>
+        </div>
+        <div class="mobile-record-fields">
+          <div class="mobile-record-field"><div class="mobile-record-label">类型</div><div class="mobile-record-value">{{ assetTypeLabels[row.asset_type as AssetType] }}</div></div>
+          <div class="mobile-record-field"><div class="mobile-record-label">当前价值</div><div class="mobile-record-value"><AmountText :value="row.current_balance" /></div></div>
+          <div class="mobile-record-field" style="grid-column: 1 / -1"><div class="mobile-record-label">期限状态</div><div class="mobile-record-value">
+            <span v-if="row.asset_type === 'BOND_FUND'">{{ bondFundInfo(row) }}</span>
+            <span v-else-if="row.asset_type === 'FLEXIBLE_TERM'">{{ flexibleTermInfo(row) }}</span>
+            <span v-else-if="row.asset_type === 'COMMERCIAL_PENSION'">预约赎回：{{ row.commercial_pension?.reservation_window_start && row.commercial_pension?.reservation_window_end ? `${row.commercial_pension.reservation_window_start} - ${row.commercial_pension.reservation_window_end}` : '未设置' }}；持有期满：{{ row.commercial_pension?.maturity_time ?? '未设置' }}</span>
+            <span v-else-if="row.asset_type === 'TERM_DEPOSIT'">{{ termDepositInfo(row) }}</span><span v-else>—</span>
+          </div></div>
+        </div>
+        <div class="mobile-record-actions">
+          <el-button link type="primary" @click="openEdit(row)">编辑</el-button>
+          <el-button link type="primary" @click="openAppend(row)">追加</el-button>
+          <el-button v-if="row.asset_type === 'STOCK_FUND' && row.status === 'ACTIVE'" link type="primary" @click="openInvestment(row)">定投</el-button>
+          <el-button link :type="row.status === 'ACTIVE' ? 'warning' : 'success'" @click="toggleStatus(row)">{{ row.status === 'ACTIVE' ? '关闭' : '启用' }}</el-button>
+          <el-button link type="danger" @click="remove(row)">删除</el-button>
+        </div>
+      </el-card>
+    </div>
+
+    <el-card shadow="never" class="desktop-records">
       <el-table :data="assets" v-loading="loading" @selection-change="selectedAssets = $event">
         <el-table-column type="selection" width="48" />
         <el-table-column prop="name" label="资产" min-width="110">
@@ -339,6 +367,11 @@ function openInvestment(asset: Asset) {
 }
 const assets = ref<Asset[]>([])       // 当前筛选条件下的资产列表
 const selectedAssets = ref<Asset[]>([])
+function toggleAssetSelection(asset: Asset, checked: string | number | boolean) {
+  const selected = selectedAssets.value.some((item) => item.id === asset.id)
+  if (checked && !selected) selectedAssets.value = [...selectedAssets.value, asset]
+  if (!checked && selected) selectedAssets.value = selectedAssets.value.filter((item) => item.id !== asset.id)
+}
 const loading = ref(false)            // 列表加载中
 const saving = ref(false)             // 表单提交中
 const maintaining = ref(false)        // 手动维护请求中
@@ -548,6 +581,7 @@ async function load() {
   if (!store.householdId) {
     return
   }
+  selectedAssets.value = []
   loading.value = true
   try {
     assets.value = await listAssets(store.householdId, {

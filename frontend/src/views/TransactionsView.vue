@@ -36,7 +36,24 @@
       <span v-if="selectedTransactions.length" class="selection-count">已选 {{ selectedTransactions.length }} 项</span>
     </div>
 
-    <el-card shadow="never">
+    <div class="mobile-records">
+      <el-empty v-if="!loading && transactions.length === 0" description="暂无交易记录" />
+      <el-card v-for="row in transactions" :key="row.id" shadow="never" class="mobile-record-card">
+        <div class="mobile-record-heading">
+          <el-checkbox :model-value="selectedTransactions.some((item) => item.id === row.id)" aria-label="选择交易记录" @change="toggleTransactionSelection(row, $event)" />
+          <div class="mobile-record-title">{{ row.title }}<div class="mobile-record-meta">{{ row.transaction_time }} · {{ store.memberName(row.owner_member_id) }}</div></div>
+          <el-tag size="small" :type="tagType(row.type)">{{ typeLabel(row) }}</el-tag>
+        </div>
+        <div class="mobile-record-fields">
+          <div class="mobile-record-field"><div class="mobile-record-label">交易</div><div class="mobile-record-value">{{ row.subtitle || '—' }}</div></div>
+          <div class="mobile-record-field"><div class="mobile-record-label">金额</div><span class="amount" :class="row.direction === 'OUT' ? 'negative' : row.direction === 'IN' ? 'positive' : ''">{{ amountText(row) }}</span></div>
+          <div class="mobile-record-field" style="grid-column: 1 / -1"><div class="mobile-record-label">备注</div><div class="mobile-record-value">{{ row.remark?.trim() || '—' }}</div></div>
+        </div>
+        <div class="mobile-record-actions"><el-button link type="primary" @click="openEditor(row)">编辑</el-button><el-button link type="danger" @click="remove(row)">删除</el-button></div>
+      </el-card>
+    </div>
+
+    <el-card shadow="never" class="desktop-records">
       <el-table :data="transactions" v-loading="loading" @selection-change="selectedTransactions = $event">
         <el-table-column type="selection" width="48" />
         <el-table-column prop="transaction_time" label="时间" width="150" />
@@ -232,6 +249,11 @@ type DeleteMode = 'records' | 'rollback'
 const store = useAppStore()
 const transactions = ref<Transaction[]>([]) // 当前页流水
 const selectedTransactions = ref<Transaction[]>([])
+function toggleTransactionSelection(transaction: Transaction, checked: string | number | boolean) {
+  const selected = selectedTransactions.value.some((item) => item.id === transaction.id)
+  if (checked && !selected) selectedTransactions.value = [...selectedTransactions.value, transaction]
+  if (!checked && selected) selectedTransactions.value = selectedTransactions.value.filter((item) => item.id !== transaction.id)
+}
 const loading = ref(false)                  // 列表加载中
 const saving = ref(false)                   // 表单提交中
 const total = ref(0)                        // 总条数
@@ -354,6 +376,7 @@ async function load() {
   if (!store.householdId) {
     return
   }
+  selectedTransactions.value = []
   loading.value = true
   try {
     const query = {

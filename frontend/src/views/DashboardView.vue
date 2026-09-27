@@ -2,19 +2,19 @@
 <template>
   <div>
     <el-row :gutter="16">
-      <el-col :span="8">
+      <el-col :span="8" :xs="24" :sm="12" :md="8">
         <el-card shadow="never" class="hero">
           <div class="hero-label">家庭净资产</div>
           <div class="hero-value"><AmountText :value="overview?.net_worth ?? 0" /></div>
         </el-card>
       </el-col>
-      <el-col :span="8">
+      <el-col :span="8" :xs="24" :sm="12" :md="8">
         <el-card shadow="never">
           <div class="metric-label">总资产</div>
           <div class="metric-value"><AmountText :value="overview?.total_assets ?? 0" /></div>
         </el-card>
       </el-col>
-      <el-col :span="8">
+      <el-col :span="8" :xs="24" :sm="12" :md="8">
         <el-card shadow="never">
           <div class="metric-label">总负债</div>
           <div class="metric-value"><AmountText :value="overview?.total_liabilities ?? 0" /></div>
@@ -23,19 +23,19 @@
     </el-row>
 
     <el-row :gutter="16" class="row">
-      <el-col :span="8">
+      <el-col :span="8" :xs="24" :sm="12" :md="8">
         <el-card shadow="never">
           <div class="metric-label">本月收入</div>
           <div class="metric-value income"><AmountText :value="overview?.month_income ?? 0" /></div>
         </el-card>
       </el-col>
-      <el-col :span="8">
+      <el-col :span="8" :xs="24" :sm="12" :md="8">
         <el-card shadow="never">
           <div class="metric-label">本月支出</div>
           <div class="metric-value expense"><AmountText :value="overview?.month_expense ?? 0" /></div>
         </el-card>
       </el-col>
-      <el-col :span="8">
+      <el-col :span="8" :xs="24" :sm="12" :md="8">
         <el-card shadow="never">
           <div class="metric-label">本月结余</div>
           <div class="metric-value"><AmountText :value="overview?.month_balance ?? 0" /></div>
@@ -44,13 +44,13 @@
     </el-row>
 
     <el-row :gutter="16" class="row">
-      <el-col :span="12">
+      <el-col :span="12" :xs="24" :md="12">
         <el-card shadow="never">
           <BaseChart v-if="hasAccounts" :option="accountPieChart" height="300px" />
           <el-empty v-else description="暂无账户数据" />
         </el-card>
       </el-col>
-      <el-col :span="12">
+      <el-col :span="12" :xs="24" :md="12">
         <el-card shadow="never">
           <BaseChart v-if="hasAssetTypes" :option="assetTypeOption" height="300px" />
           <el-empty v-else description="暂无资产数据" />
@@ -64,13 +64,13 @@
     </el-card>
 
     <el-row :gutter="16" class="row">
-      <el-col :span="12">
+      <el-col :span="12" :xs="24" :md="12">
         <el-card shadow="never">
           <BaseChart v-if="hasAccounts" :option="accountOption" height="320px" />
           <el-empty v-else description="暂无账户数据" />
         </el-card>
       </el-col>
-      <el-col :span="12">
+      <el-col :span="12" :xs="24" :md="12">
         <el-card shadow="never">
           <template #header><span>按账户</span></template>
           <el-table :data="overview?.by_account ?? []" size="small" max-height="320">
@@ -84,7 +84,7 @@
     </el-row>
 
     <el-row :gutter="16" class="row">
-      <el-col :span="12">
+      <el-col :span="12" :xs="24" :md="12">
         <el-card shadow="never">
           <template #header><span>按成员</span></template>
           <el-table :data="overview?.by_member ?? []" size="small">
@@ -95,7 +95,7 @@
           </el-table>
         </el-card>
       </el-col>
-      <el-col :span="12">
+      <el-col :span="12" :xs="24" :md="12">
         <el-card shadow="never">
           <template #header><span>按资产类型</span></template>
           <el-table :data="overview?.by_type ?? []" size="small">

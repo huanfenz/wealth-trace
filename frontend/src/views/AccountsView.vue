@@ -12,7 +12,26 @@
       <div class="spacer" />
     </div>
 
-    <el-card shadow="never">
+    <div class="mobile-records">
+      <el-empty v-if="!loading && accounts.length === 0" description="暂无账户" />
+      <el-card v-for="row in accounts" :key="row.id" shadow="never" class="mobile-record-card">
+        <div class="mobile-record-heading">
+          <el-checkbox :model-value="selectedAccounts.some((item) => item.id === row.id)" aria-label="选择账户" @change="toggleAccountSelection(row, $event)" />
+          <div class="mobile-record-title">{{ row.name }}</div>
+          <el-tag :type="row.enabled ? 'success' : 'info'" size="small">{{ row.enabled ? '启用' : '停用' }}</el-tag>
+        </div>
+        <div class="mobile-record-fields">
+          <div class="mobile-record-field"><div class="mobile-record-label">类型</div><div class="mobile-record-value">{{ accountTypeLabels[row.type as AccountType] }}</div></div>
+          <div class="mobile-record-field"><div class="mobile-record-label">属主</div><div class="mobile-record-value">{{ store.memberName(row.owner_member_id) }}</div></div>
+          <div class="mobile-record-field"><div class="mobile-record-label">机构</div><div class="mobile-record-value">{{ row.institution_name || '—' }}</div></div>
+          <div class="mobile-record-field"><div class="mobile-record-label">资产数</div><div class="mobile-record-value">{{ row.asset_count }}</div></div>
+          <div class="mobile-record-field"><div class="mobile-record-label">余额</div><div class="mobile-record-value"><AmountText :value="row.balance" /></div></div>
+        </div>
+        <div class="mobile-record-actions"><el-button link type="primary" @click="openEdit(row)">编辑</el-button><el-button link type="danger" @click="remove(row)">删除</el-button></div>
+      </el-card>
+    </div>
+
+    <el-card shadow="never" class="desktop-records">
       <el-table :data="accounts" v-loading="loading" @selection-change="selectedAccounts = $event">
         <el-table-column type="selection" width="48" />
         <el-table-column prop="name" label="账户" />
@@ -101,6 +120,11 @@ import type { Account, AccountType } from '@/types'
 const store = useAppStore()
 const accounts = ref<Account[]>([])       // 当前筛选条件下的账户列表
 const selectedAccounts = ref<Account[]>([])
+function toggleAccountSelection(account: Account, checked: string | number | boolean) {
+  const selected = selectedAccounts.value.some((item) => item.id === account.id)
+  if (checked && !selected) selectedAccounts.value = [...selectedAccounts.value, account]
+  if (!checked && selected) selectedAccounts.value = selectedAccounts.value.filter((item) => item.id !== account.id)
+}
 const loading = ref(false)                // 列表加载中
 const saving = ref(false)                 // 表单提交中
 const dialogVisible = ref(false)          // 弹窗显隐
@@ -126,6 +150,7 @@ async function load() {
   if (!store.householdId) {
     return
   }
+  selectedAccounts.value = []
   loading.value = true
   try {
     accounts.value = await listAccounts(store.householdId, filterMember.value)

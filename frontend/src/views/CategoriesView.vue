@@ -7,7 +7,15 @@
           <el-button type="primary" :icon="Plus" @click="openCreate(group.type)">新增分类</el-button>
         </div>
       </template>
-      <el-table :data="categories.filter((item) => item.type === group.type)" v-loading="loading">
+      <div class="mobile-records">
+        <el-empty v-if="!loading && categories.filter((item) => item.type === group.type).length === 0" description="暂无分类" />
+        <el-card v-for="row in categories.filter((item) => item.type === group.type)" :key="row.id" shadow="never" class="mobile-record-card">
+          <div class="mobile-record-heading"><div class="mobile-record-title">{{ row.name }}</div><el-tag :type="row.active ? 'success' : 'info'" size="small">{{ row.active ? '启用' : '停用' }}</el-tag></div>
+          <div class="mobile-record-fields"><div class="mobile-record-field"><div class="mobile-record-label">排序</div><div>{{ row.sort_order }}</div></div></div>
+          <div class="mobile-record-actions"><el-button link type="primary" @click="openEdit(row)">编辑</el-button><el-button link :type="row.active ? 'danger' : 'success'" @click="toggle(row)">{{ row.active ? '停用' : '启用' }}</el-button><el-button link type="danger" @click="remove(row)">删除</el-button></div>
+        </el-card>
+      </div>
+      <el-table class="desktop-records" :data="categories.filter((item) => item.type === group.type)" v-loading="loading">
         <el-table-column prop="name" label="分类名称" />
         <el-table-column prop="sort_order" label="排序" width="100" />
         <el-table-column label="状态" width="100">

@@ -8,7 +8,26 @@
       <el-button type="danger" :disabled="selectedPlans.length === 0" @click="bulkRemove">批量删除</el-button>
       <span v-if="selectedPlans.length" class="selection-count">已选 {{ selectedPlans.length }} 项</span>
     </div>
-    <el-card shadow="never">
+    <div class="mobile-records">
+      <el-empty v-if="!loading && plans.length === 0" description="还没有定投计划" />
+      <el-card v-for="row in plans" :key="row.id" shadow="never" class="mobile-record-card">
+        <div class="mobile-record-heading">
+          <el-checkbox :model-value="selectedPlans.some((item) => item.id === row.id)" :disabled="!planSelectable(row)" aria-label="选择定投计划" @change="togglePlanSelection(row, $event)" />
+          <div class="mobile-record-title">{{ assetName(row.target_asset_id) }}<div class="mobile-record-meta">付款资产：{{ assetName(row.source_asset_id) }}</div></div>
+          <el-tag :type="row.status === 'ACTIVE' ? 'success' : row.status === 'PAUSED' ? 'warning' : 'info'" size="small">{{ statusLabel(row.status) }}</el-tag>
+        </div>
+        <div class="mobile-record-fields">
+          <div class="mobile-record-field"><div class="mobile-record-label">定投金额</div><div class="mobile-record-value">{{ formatMoney(row.amount) }}</div></div>
+          <div class="mobile-record-field"><div class="mobile-record-label">周期</div><div class="mobile-record-value">{{ cadence(row) }}</div></div>
+          <div class="mobile-record-field"><div class="mobile-record-label">下次执行</div><div class="mobile-record-value">{{ row.next_due_date }}</div></div>
+        </div>
+        <div class="mobile-record-actions">
+          <el-button link type="primary" @click="showHistory(row)">执行记录</el-button>
+          <template v-if="row.status !== 'DELETED'"><el-button link type="primary" @click="openEdit(row)">编辑</el-button><el-button link @click="toggleStatus(row)">{{ row.status === 'ACTIVE' ? '暂停' : '恢复' }}</el-button><el-button link type="danger" @click="remove(row)">删除</el-button></template>
+        </div>
+      </el-card>
+    </div>
+    <el-card shadow="never" class="desktop-records">
       <el-table :data="plans" v-loading="loading" @selection-change="selectedPlans = $event">
         <el-table-column type="selection" width="48" :selectable="planSelectable" />
         <el-table-column label="股票基金" min-width="160"><template #default="{ row }">{{ assetName(row.target_asset_id) }}</template></el-table-column>
@@ -66,7 +85,15 @@
     </el-dialog>
 
     <el-dialog v-model="historyVisible" :title="`${historyPlan ? assetName(historyPlan.target_asset_id) : ''} · 执行记录`" width="760px">
-      <el-table :data="executions" v-loading="historyLoading" max-height="480">
+      <div class="mobile-records">
+        <el-empty v-if="!historyLoading && executions.length === 0" description="暂无执行记录" />
+        <el-card v-for="row in executions" :key="row.id" shadow="never" class="mobile-record-card">
+          <div class="mobile-record-heading"><div class="mobile-record-title">{{ row.scheduled_date }}<div class="mobile-record-meta">{{ assetName(row.source_asset_id) }}</div></div><el-tag :type="executionTag(row.status)" size="small">{{ executionLabel(row.status) }}</el-tag></div>
+          <div class="mobile-record-fields"><div class="mobile-record-field"><div class="mobile-record-label">金额</div><div>{{ formatMoney(row.amount) }}</div></div><div class="mobile-record-field"><div class="mobile-record-label">说明</div><div class="mobile-record-value">{{ row.failure_reason || '—' }}</div></div></div>
+          <div v-if="row.status === 'FAILED' && historyPlan?.status !== 'DELETED'" class="mobile-record-actions"><el-button link type="primary" @click="retry(row.id)">重试</el-button></div>
+        </el-card>
+      </div>
+      <el-table class="desktop-records" :data="executions" v-loading="historyLoading" max-height="480">
         <el-table-column prop="scheduled_date" label="预定日期" width="125" />
         <el-table-column label="金额" width="130" align="right"><template #default="{ row }">{{ formatMoney(row.amount) }}</template></el-table-column>
         <el-table-column label="付款资产" min-width="140"><template #default="{ row }">{{ assetName(row.source_asset_id) }}</template></el-table-column>
@@ -93,6 +120,11 @@ const store = useAppStore()
 const route = useRoute()
 const plans = ref<RecurringInvestmentPlan[]>([])
 const selectedPlans = ref<RecurringInvestmentPlan[]>([])
+function togglePlanSelection(plan: RecurringInvestmentPlan, checked: string | number | boolean) {
+  const selected = selectedPlans.value.some((item) => item.id === plan.id)
+  if (checked && !selected) selectedPlans.value = [...selectedPlans.value, plan]
+  if (!checked && selected) selectedPlans.value = selectedPlans.value.filter((item) => item.id !== plan.id)
+}
 const executions = ref<RecurringInvestmentExecution[]>([])
 const loading = ref(false)
 const saving = ref(false)
@@ -146,7 +178,7 @@ function requestBody() {
     weekday:form.frequency==='WEEKLY'||form.frequency==='BIWEEKLY' ? form.weekday : null,
     month_day:form.frequency==='MONTHLY' ? form.month_day : null, start_date:form.start_date }
 }
-async function load() { if (!store.householdId) return; loading.value=true; try { plans.value=await listInvestmentPlans(store.householdId) } catch(e) { ElMessage.error((e as Error).message) } finally { loading.value=false } }
+async function load() { if (!store.householdId) return; selectedPlans.value=[]; loading.value=true; try { plans.value=await listInvestmentPlans(store.householdId) } catch(e) { ElMessage.error((e as Error).message) } finally { loading.value=false } }
 async function submit() { let body:Record<string,unknown>; try { body=requestBody() } catch(e) { ElMessage.warning((e as Error).message); return }
   saving.value=true; try { if(editing.value===null) await createInvestmentPlan(store.householdId,body); else await updateInvestmentPlan(editing.value,body)
     dialogVisible.value=false; await Promise.all([load(),store.refreshAssets()]); ElMessage.success('定投计划已保存')

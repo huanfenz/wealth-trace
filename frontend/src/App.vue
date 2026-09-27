@@ -46,9 +46,14 @@
       </el-menu>
     </el-aside>
 
-    <el-container>
+    <el-container class="main-shell">
       <el-header class="header">
-        <div class="title">{{ pageTitle }}</div>
+        <div class="header-leading">
+          <el-button class="mobile-menu-button" text circle aria-label="打开导航菜单" @click="menuVisible = true">
+            <el-icon><Menu /></el-icon>
+          </el-button>
+          <div class="title">{{ pageTitle }}</div>
+        </div>
         <div class="household">{{ householdName }}</div>
       </el-header>
       <el-main>
@@ -59,17 +64,33 @@
       </el-main>
     </el-container>
   </el-container>
+
+  <el-drawer v-model="menuVisible" title="财迹 · 家庭资产管理" direction="ltr" size="min(82vw, 300px)" class="mobile-nav-drawer">
+    <el-menu :default-active="activeMenu" router class="menu mobile-menu" @select="menuVisible = false">
+      <el-menu-item index="/dashboard"><el-icon><DataAnalysis /></el-icon><span>家庭总览</span></el-menu-item>
+      <el-menu-item index="/members"><el-icon><User /></el-icon><span>成员管理</span></el-menu-item>
+      <el-menu-item index="/accounts"><el-icon><CreditCard /></el-icon><span>账户管理</span></el-menu-item>
+      <el-menu-item index="/assets"><el-icon><Wallet /></el-icon><span>资产管理</span></el-menu-item>
+      <el-menu-item index="/transactions"><el-icon><Tickets /></el-icon><span>收支与转账</span></el-menu-item>
+      <el-menu-item index="/categories"><el-icon><CollectionTag /></el-icon><span>分类管理</span></el-menu-item>
+      <el-menu-item index="/investments"><el-icon><Clock /></el-icon><span>定投管理</span></el-menu-item>
+      <el-menu-item index="/statistics"><el-icon><TrendCharts /></el-icon><span>收支统计</span></el-menu-item>
+      <el-menu-item index="/data-backup"><el-icon><FolderOpened /></el-icon><span>数据备份</span></el-menu-item>
+    </el-menu>
+  </el-drawer>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import { Menu } from '@element-plus/icons-vue'
 
 import { useAppStore } from '@/stores/app'
 
 const store = useAppStore()
 const route = useRoute()
+const menuVisible = ref(false)
 
 const activeMenu = computed(() => route.path) // 当前高亮菜单由路由路径决定
 const pageTitle = computed(() => (route.meta.title as string) ?? '财迹')
@@ -87,7 +108,7 @@ onMounted(async () => {
 
 <style scoped>
 .app-shell {
-  height: 100%;
+  min-height: 100%;
 }
 
 .aside {
@@ -127,6 +148,9 @@ onMounted(async () => {
   justify-content: space-between;
 }
 
+.header-leading { display: flex; align-items: center; min-width: 0; gap: 8px; }
+.mobile-menu-button { display: none; flex: none; font-size: 20px; }
+
 .header .title {
   font-size: 16px;
   font-weight: 600;
@@ -139,5 +163,18 @@ onMounted(async () => {
 
 .el-main {
   background: var(--wt-bg);
+  min-width: 0;
+}
+
+@media (max-width: 767px) {
+  .app-shell { min-height: 100dvh; height: auto; }
+  .aside { display: none; }
+  .main-shell { min-width: 0; width: 100%; }
+  .header { height: 56px; padding: 0 14px; }
+  .mobile-menu-button { display: inline-flex; }
+  .header .title { font-size: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .header .household { max-width: 35vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+  .el-main { padding: 12px; }
+  .mobile-menu { border-right: none; }
 }
 </style>

@@ -17,19 +17,19 @@
     </div>
 
     <el-row :gutter="16">
-      <el-col :span="8">
+      <el-col :span="8" :xs="24" :sm="12" :md="8">
         <el-card shadow="never">
           <div class="metric-label">收入</div>
           <div class="metric-value income"><AmountText :value="stats?.income ?? 0" /></div>
         </el-card>
       </el-col>
-      <el-col :span="8">
+      <el-col :span="8" :xs="24" :sm="12" :md="8">
         <el-card shadow="never">
           <div class="metric-label">支出</div>
           <div class="metric-value expense"><AmountText :value="stats?.expense ?? 0" /></div>
         </el-card>
       </el-col>
-      <el-col :span="8">
+      <el-col :span="8" :xs="24" :sm="12" :md="8">
         <el-card shadow="never">
           <div class="metric-label">结余</div>
           <div class="metric-value"><AmountText :value="stats?.balance ?? 0" /></div>
@@ -38,13 +38,13 @@
     </el-row>
 
     <el-row :gutter="16" class="row">
-      <el-col :span="12">
+      <el-col :span="12" :xs="24" :md="12">
         <el-card shadow="never">
           <BaseChart v-if="hasExpense" :option="expensePieOption" height="300px" />
           <el-empty v-else description="本月暂无支出" />
         </el-card>
       </el-col>
-      <el-col :span="12">
+      <el-col :span="12" :xs="24" :md="12">
         <el-card shadow="never">
           <BaseChart v-if="hasIncome" :option="incomePieOption" height="300px" />
           <el-empty v-else description="本月暂无收入" />
@@ -53,7 +53,7 @@
     </el-row>
 
     <el-row :gutter="16" class="row">
-      <el-col :span="12">
+      <el-col :span="12" :xs="24" :md="12">
         <el-card shadow="never">
           <template #header><span>支出分类</span></template>
           <el-table :data="stats?.expense_categories ?? []" size="small">
@@ -64,7 +64,7 @@
           </el-table>
         </el-card>
       </el-col>
-      <el-col :span="12">
+      <el-col :span="12" :xs="24" :md="12">
         <el-card shadow="never">
           <template #header><span>收入分类</span></template>
           <el-table :data="stats?.income_categories ?? []" size="small">
@@ -78,13 +78,13 @@
     </el-row>
 
     <el-row :gutter="16" class="row">
-      <el-col :span="12">
+      <el-col :span="12" :xs="24" :md="12">
         <el-card shadow="never">
           <BaseChart v-if="hasMembers" :option="memberBarOption" height="300px" />
           <el-empty v-else description="暂无成员数据" />
         </el-card>
       </el-col>
-      <el-col :span="12">
+      <el-col :span="12" :xs="24" :md="12">
         <el-card shadow="never">
           <template #header><span>成员结余</span></template>
           <el-table :data="stats?.by_member ?? []" size="small" max-height="300">
