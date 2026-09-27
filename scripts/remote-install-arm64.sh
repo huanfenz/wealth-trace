@@ -137,7 +137,10 @@ PY
 )"
 if [[ -f "${database_path}" ]]; then
   backup_dir='/var/lib/wealth-trace/backups'
-  install -d -m 700 "${backup_dir}"
+  # The service imports backups as wealthtrace; keep the directory writable
+  # by that account even when this installer runs as root. install -d also
+  # repairs ownership on directories created by older releases.
+  install -d -m 700 -o wealthtrace -g wealthtrace "${backup_dir}"
   python3 - "${database_path}" "${backup_dir}/${release_id}.db" <<'PY'
 import sqlite3, sys
 source = sqlite3.connect(f'file:{sys.argv[1]}?mode=ro', uri=True)
