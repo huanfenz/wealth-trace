@@ -226,6 +226,7 @@ function createServer() {
   });
   registerTool(server, 'update_transaction_category', { description: '修改分类名称和排序；历史流水会显示新名称。', inputSchema: z.object({ household_id: id, id, name: z.string().min(1).max(64), sort_order: z.number().int().min(0) }) }, (v) => api(`/households/${v.household_id}/categories/${v.id}`, 'PUT', { name: v.name, sort_order: v.sort_order }));
   registerTool(server, 'set_transaction_category_status', { description: '启用或停用分类；停用不影响历史流水。', inputSchema: z.object({ household_id: id, id, active: z.boolean() }) }, (v) => api(`/households/${v.household_id}/categories/${v.id}/status`, 'PUT', { active: v.active }));
+  registerTool(server, 'delete_transaction_category', { description: '删除没有任何交易使用的分类。', inputSchema: z.object({ household_id: id, id }), destructive: true }, (v) => api(`/households/${v.household_id}/categories/${v.id}`, 'DELETE'));
   const txInput = z.object({ household_id: id, asset_id: id, amount: z.number().int(), category_id: id.nullable().optional(), transaction_time: transactionTime, remark: transactionRemark });
   registerTool(server, 'record_income', { description: '记录收入，amount 使用人民币分。', inputSchema: txInput }, (v) => {
     const { household_id, ...body } = v;

@@ -15,12 +15,13 @@
             <el-tag :type="scope.row.active ? 'success' : 'info'">{{ scope.row.active ? '启用' : '停用' }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="190" align="right">
+        <el-table-column label="操作" width="250" align="right">
           <template #default="scope">
             <el-button link type="primary" @click="openEdit(scope.row)">编辑</el-button>
             <el-button link :type="scope.row.active ? 'danger' : 'success'" @click="toggle(scope.row)">
               {{ scope.row.active ? '停用' : '启用' }}
             </el-button>
+            <el-button link type="danger" @click="remove(scope.row)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -42,7 +43,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import * as api from '@/api'
 import { useAppStore } from '@/stores/app'
@@ -95,6 +96,21 @@ async function toggle(item: TransactionCategory) {
     await api.setCategoryActive(store.householdId, item.id, !item.active)
     await Promise.all([load(), store.refreshCategories()])
   } catch (error) { ElMessage.error((error as Error).message) }
+}
+async function remove(item: TransactionCategory) {
+  try {
+    await ElMessageBox.confirm(`确认删除分类“${item.name}”？已被交易使用的分类无法删除。`, '删除分类', {
+      type: 'warning', confirmButtonText: '确认删除', confirmButtonClass: 'el-button--danger',
+    })
+  } catch { return }
+  try {
+    await api.deleteCategory(store.householdId, item.id)
+    await Promise.all([load(), store.refreshCategories()])
+    ElMessage.success('分类已删除')
+  } catch (error) {
+    const message = (error as Error).message
+    ElMessage.error(message === 'category is used by transactions' ? '该分类已有交易使用，无法删除。可将其停用。' : message)
+  }
 }
 onMounted(load)
 </script>

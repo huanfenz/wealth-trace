@@ -119,6 +119,10 @@
 { "active": false }
 ```
 
+### `DELETE /api/households/{household_id}/categories/{id}`
+
+仅当该分类没有任何关联交易时可删除，成功返回 `{ "deleted": true }`。已有交易使用时返回 409，停用的分类也可删除。
+
 ### `GET /api/households/{id}` / `PUT /api/households/{id}`
 
 `PUT` 请求体：

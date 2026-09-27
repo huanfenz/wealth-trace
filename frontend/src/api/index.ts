@@ -79,6 +79,9 @@ export function updateCategory(householdId: number, id: number, body: { name: st
 export function setCategoryActive(householdId: number, id: number, active: boolean): Promise<TransactionCategory> {
   return put<TransactionCategory>(`/households/${householdId}/categories/${id}/status`, { active })
 }
+export function deleteCategory(householdId: number, id: number): Promise<{ deleted: boolean }> {
+  return del<{ deleted: boolean }>(`/households/${householdId}/categories/${id}`)
+}
 
 // --- households（家庭） ----------------------------------------------------
 

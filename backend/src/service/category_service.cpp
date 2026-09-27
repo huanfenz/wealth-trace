@@ -125,4 +125,26 @@ TransactionCategory CategoryService::set_active(std::int64_t household_id, std::
   update.bind(1, active ? 1 : 0).bind(2, now).bind(3, id).run();
   c.active = active; c.updated_at = now; return c;
 }
+
+void CategoryService::remove(std::int64_t household_id, std::int64_t id) {
+  std::scoped_lock lock(database_.mutex());
+  TransactionType type;
+  {
+    Statement category(database_, "SELECT type FROM transaction_category WHERE id = ? AND household_id = ?;");
+    category.bind(1, id).bind(2, household_id);
+    if (!category.step()) throw not_found("category not found");
+    type = parse_transaction_type(category.get_text(0)).value();
+  }
+  // Ensure deleting an initial category cannot cause it to be seeded again on the next list.
+  seed_defaults(household_id, type);
+  TransactionGuard tx(database_);
+  {
+    Statement used(database_, "SELECT 1 FROM transactions WHERE category_id = ? LIMIT 1;");
+    used.bind(1, id);
+    if (used.step()) throw conflict("category is used by transactions");
+  }
+  Statement remove(database_, "DELETE FROM transaction_category WHERE id = ? AND household_id = ?;");
+  remove.bind(1, id).bind(2, household_id).run();
+  tx.commit();
+}
 }  // namespace wt

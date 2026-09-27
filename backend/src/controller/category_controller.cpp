@@ -68,5 +68,13 @@ void CategoryController::register_routes(crow::SimpleApp& app) {
           return category_json(service_.set_active(household_id, id, body["active"].get<bool>()));
         });
       });
+
+  CROW_ROUTE(app, "/api/households/<int>/categories/<int>").methods("DELETE"_method)(
+      [this](const crow::request&, int household_id, int id) {
+        return http::handle([this, household_id, id] {
+          service_.remove(household_id, id);
+          return nlohmann::json{{"deleted", true}};
+        });
+      });
 }
 }  // namespace wt

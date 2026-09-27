@@ -23,6 +23,7 @@ class CategoryService {
   TransactionCategory update(std::int64_t household_id, std::int64_t id, const std::string& name,
                              int sort_order);
   TransactionCategory set_active(std::int64_t household_id, std::int64_t id, bool active);
+  void remove(std::int64_t household_id, std::int64_t id);
 
  private:
   void require_household(std::int64_t id);

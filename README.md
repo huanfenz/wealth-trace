@@ -264,7 +264,7 @@ bash scripts/static_smoke.sh     # 验证后端静态托管前端
 | `categories.expense` | 新家庭的初始支出分类 | 餐饮/交通/... |
 | `categories.income` | 新家庭的初始收入分类 | 工资/奖金/... |
 
-分类保存于数据库，可在应用的“分类管理”页面新增、改名和停用。配置文件分类仅作为初始模板。
+分类保存于数据库，可在应用的“分类管理”页面新增、改名、停用和删除未被交易使用的分类。配置文件分类仅作为初始模板。
 
 配置文件路径可通过命令行参数或环境变量 `WEALTH_TRACE_CONFIG` 指定：
 
@@ -316,6 +316,7 @@ WEALTH_TRACE_CONFIG=/path/to/config.json ./build/backend/wealth-trace
 | POST | `/api/database/import` | 校验并整体导入数据库备份（最大 100 MiB） |
 | GET/POST | `/api/households` | 家庭列表/创建 |
 | GET/PUT | `/api/households/{id}` | 家庭详情/更新 |
+| DELETE | `/api/households/{household_id}/categories/{id}` | 删除未被交易使用的分类 |
 | GET/POST | `/api/households/{id}/members` | 成员列表/创建 |
 | GET/PUT | `/api/members/{id}` | 成员详情/更新 |
 | GET/POST | `/api/households/{id}/accounts` | 账户列表（含余额）/创建 |

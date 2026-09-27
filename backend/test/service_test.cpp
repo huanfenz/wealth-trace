@@ -225,6 +225,36 @@ TEST_F(ServiceFixture, CategoriesAreManagedAndLinkedToTransactions) {
   EXPECT_THROW(categories.update(household_.id + 999, created.id, "越权改名", 0), ApiError);
 }
 
+TEST_F(ServiceFixture, CategoryCanBeDeletedOnlyWhenNoTransactionUsesIt) {
+  CategoryConfig defaults;
+  defaults.expense = {"餐饮"};
+  CategoryService categories(database_, defaults);
+  const auto unused = categories.create(household_.id, TransactionType::Expense, "未使用");
+  categories.set_active(household_.id, unused.id, false);
+  EXPECT_THROW(categories.remove(household_.id + 1, unused.id), ApiError);
+  categories.remove(household_.id, unused.id);
+  EXPECT_THROW(categories.remove(household_.id, unused.id), ApiError);
+
+  const auto seeded = categories.list(household_.id, TransactionType::Expense);
+  ASSERT_EQ(seeded.size(), 1u);
+  const auto used = seeded.front();
+  const auto cash = make_asset("现金", AssetType::Cash, 10000);
+  TransactionService transactions(database_);
+  const auto recorded = transactions.record_expense(household_.id, cash.id, used.id,
+      100, business_noon_utc(), std::nullopt);
+  try {
+    categories.remove(household_.id, used.id);
+    FAIL() << "deleting a used category should fail";
+  } catch (const ApiError& error) {
+    EXPECT_EQ(error.http_status(), 409);
+  }
+  EXPECT_EQ(transactions.get(recorded.id).category_id, used.id);
+
+  transactions.update_category(recorded.id, std::nullopt);
+  categories.remove(household_.id, used.id);
+  EXPECT_TRUE(categories.list(household_.id, TransactionType::Expense, true).empty());
+}
+
 // 转账以一个业务交易保存，Entry 分别描述转出与转入资产变化。
 TEST_F(ServiceFixture, TransferIsOneTransactionWithTwoEntries) {
   const Asset cash = make_asset("活期", AssetType::Cash, 1000000);
