@@ -33,6 +33,26 @@ def call(method, path, payload=None):
     return body["data"]
 
 
+def backup_roundtrip():
+    with urllib.request.urlopen(BASE + "/api/database/export", timeout=10) as response:
+        backup = response.read()
+    assert backup.startswith(b"SQLite format 3\x00")
+
+    before = call("GET", "/api/households")
+    household_id = before[0]["id"]
+    marker = call("POST", f"/api/households/{household_id}/members",
+                  {"name": "备份恢复测试", "role": "MEMBER"})
+    request = urllib.request.Request(
+        BASE + "/api/database/import", data=backup,
+        headers={"Content-Type": "application/vnd.sqlite3"}, method="POST")
+    with urllib.request.urlopen(request, timeout=10) as response:
+        result = json.loads(response.read().decode("utf-8"))
+    assert result["code"] == 0, result
+    assert result["data"]["imported"] is True
+    members = call("GET", f"/api/households/{household_id}/members")
+    assert all(member["id"] != marker["id"] for member in members)
+
+
 def main():
     health = call("GET", "/api/health")
     assert health["status"] == "ok"
@@ -114,6 +134,7 @@ def main():
     assert kept_cash["current_balance"] == restored_cash["current_balance"] - 100000
     assert kept_fund["current_balance"] == restored_fund["current_balance"] + 100000
 
+    backup_roundtrip()
     print("API smoke test passed")
 
 

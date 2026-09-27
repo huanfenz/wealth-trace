@@ -117,7 +117,7 @@ void create_private_database_file(const fs::path& path) {
                   fs::perm_options::replace);
 }
 
-void check_database(sqlite3* db) {
+std::int64_t check_database(sqlite3* db) {
   sqlite3_stmt* statement = nullptr;
   if (sqlite3_prepare_v2(db, "PRAGMA quick_check;", -1, &statement, nullptr) != SQLITE_OK) {
     throw invalid_request("上传文件不是有效的 SQLite 数据库");
@@ -147,18 +147,32 @@ void check_database(sqlite3* db) {
   sqlite3_finalize(statement);
   if (!has_migrations) throw invalid_request("上传文件不包含财迹数据库迁移记录");
 
+  if (sqlite3_prepare_v2(db, "SELECT COALESCE(MAX(version), 0) FROM schema_migration;",
+                         -1, &statement, nullptr) != SQLITE_OK) {
+    throw invalid_request("上传文件不包含有效的财迹数据库迁移记录");
+  }
+  const bool has_version = sqlite3_step(statement) == SQLITE_ROW;
+  const auto version = has_version ? sqlite3_column_int64(statement, 0) : 0;
+  sqlite3_finalize(statement);
+  if (!has_version) throw invalid_request("上传文件不包含有效的财迹数据库迁移记录");
+
+  // 013 将旧 transaction 表拆分为 transactions 和 transaction_entries。
+  const bool has_entries = version >= 13;
+  const std::string schema_query =
+      "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN "
+      "('schema_migration','household','household_member','account','asset',"
+      "'system_state'," +
+      std::string(has_entries ? "'transactions','transaction_entries'" : "'transaction'") +
+      ");";
   if (sqlite3_prepare_v2(
-          db,
-          "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN "
-          "('schema_migration','household','household_member','account','asset',"
-          "'transaction','system_state');",
-          -1, &statement, nullptr) != SQLITE_OK) {
+          db, schema_query.c_str(), -1, &statement, nullptr) != SQLITE_OK) {
     throw invalid_request("上传文件不是受支持的财迹数据库");
   }
   const bool has_core_schema = sqlite3_step(statement) == SQLITE_ROW &&
-                               sqlite3_column_int(statement, 0) == 7;
+                               sqlite3_column_int(statement, 0) == (has_entries ? 8 : 7);
   sqlite3_finalize(statement);
   if (!has_core_schema) throw invalid_request("上传文件不是受支持的财迹数据库");
+  return version;
 }
 
 }  // namespace
@@ -216,9 +230,8 @@ void DatabaseController::register_routes(crow::SimpleApp& app) {
           } catch (const std::exception&) {
             throw invalid_request("上传文件无法作为 SQLite 数据库打开");
           }
-          check_database(staged.handle());
+          const auto staged_version = check_database(staged.handle());
           MigrationRunner staged_migrations(staged);
-          const auto staged_version = staged_migrations.current_version();
 
           std::scoped_lock lock(database_.mutex());
           MigrationRunner current_migrations(database_);
