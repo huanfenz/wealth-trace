@@ -1,4 +1,4 @@
-<!-- 家庭总览页：展示净资产/资产负债/本月收支等指标，并以图表与表格汇总资产与收支。 -->
+<!-- 资产总览页：展示净资产/资产负债/本月收支等指标，并以图表汇总资产与收支。 -->
 <template>
   <div>
     <el-row :gutter="16">
@@ -46,126 +46,125 @@
     <el-row :gutter="16" class="row">
       <el-col :span="12" :xs="24" :md="12">
         <el-card shadow="never">
-          <BaseChart v-if="hasAccounts" :option="accountPieChart" height="300px" />
+          <BaseChart v-if="hasAccounts" :option="accountPieChart" height="300px" @slice-click="openAccountAssets" />
           <el-empty v-else description="暂无账户数据" />
         </el-card>
       </el-col>
       <el-col :span="12" :xs="24" :md="12">
         <el-card shadow="never">
-          <BaseChart v-if="hasAssetTypes" :option="assetTypeOption" height="300px" />
+          <BaseChart v-if="hasAssetTypes" :option="assetTypeOption" height="300px" @slice-click="openTypeAssets" />
           <el-empty v-else description="暂无资产数据" />
         </el-card>
       </el-col>
     </el-row>
 
     <el-card shadow="never" class="row">
-      <BaseChart v-if="monthly.length" :option="monthlyOption" height="320px" />
-      <el-empty v-else description="暂无收支数据" />
+      <div class="trend-controls">
+        <el-radio-group v-model="trendRange" size="small" aria-label="收支趋势时间范围">
+          <el-radio-button value="week">近一周</el-radio-button>
+          <el-radio-button value="month">近一月</el-radio-button>
+          <el-radio-button value="year">近一年</el-radio-button>
+        </el-radio-group>
+      </div>
+      <div v-loading="trendLoading">
+        <BaseChart v-if="trend.length" :option="trendOption" height="320px" />
+        <el-empty v-else description="暂无收支数据" />
+      </div>
     </el-card>
-
-    <el-row :gutter="16" class="row">
-      <el-col :span="12" :xs="24" :md="12">
-        <el-card shadow="never">
-          <BaseChart v-if="hasAccounts" :option="accountOption" height="320px" />
-          <el-empty v-else description="暂无账户数据" />
-        </el-card>
-      </el-col>
-      <el-col :span="12" :xs="24" :md="12">
-        <el-card shadow="never">
-          <template #header><span>按账户</span></template>
-          <el-table :data="overview?.by_account ?? []" size="small" max-height="320">
-            <el-table-column prop="name" label="账户" />
-            <el-table-column label="余额" align="right">
-              <template #default="{ row }"><AmountText :value="row.amount" /></template>
-            </el-table-column>
-          </el-table>
-        </el-card>
-      </el-col>
-    </el-row>
-
-    <el-row :gutter="16" class="row">
-      <el-col :span="12" :xs="24" :md="12">
-        <el-card shadow="never">
-          <template #header><span>按成员</span></template>
-          <el-table :data="overview?.by_member ?? []" size="small">
-            <el-table-column prop="name" label="成员" />
-            <el-table-column label="净资产" align="right">
-              <template #default="{ row }"><AmountText :value="row.amount" /></template>
-            </el-table-column>
-          </el-table>
-        </el-card>
-      </el-col>
-      <el-col :span="12" :xs="24" :md="12">
-        <el-card shadow="never">
-          <template #header><span>按资产类型</span></template>
-          <el-table :data="overview?.by_type ?? []" size="small">
-            <el-table-column label="类型">
-              <template #default="{ row }">{{ assetTypeLabels[row.asset_type as AssetType] ?? row.asset_type }}</template>
-            </el-table-column>
-            <el-table-column label="金额" align="right">
-              <template #default="{ row }"><AmountText :value="row.amount" /></template>
-            </el-table-column>
-          </el-table>
-        </el-card>
-      </el-col>
-    </el-row>
   </div>
 </template>
 
 <script setup lang="ts">
-// 职责：进入页面时并行拉取总览与近 6 个月趋势，渲染指标卡、饼图/柱状图/折线图与汇总表。
-import { computed, onMounted, ref } from 'vue'
+// 职责：进入页面时加载总览与收支趋势，渲染指标卡、饼图与折线图。
+import { computed, onMounted, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 
 import AmountText from '@/components/AmountText.vue'
 import BaseChart from '@/components/BaseChart.vue'
-import { getMonthlyStats, getOverview } from '@/api'
+import { getOverview, getTrendStats } from '@/api'
 import { useAppStore } from '@/stores/app'
-import { assetTypeLabels } from '@/utils/labels'
 import {
-  accountBarOption,
   accountPieOption,
   assetTypePieOption,
-  monthlyTrendOption,
+  incomeExpenseTrendOption,
 } from '@/utils/charts'
-import type { AssetType, HouseholdOverview, MonthlyStat } from '@/types'
+import type { HouseholdOverview, TrendRange, TrendStat } from '@/types'
 
 const store = useAppStore()
+const router = useRouter()
 const overview = ref<HouseholdOverview | null>(null)
-const monthly = ref<MonthlyStat[]>([]) // 近 6 个月收支趋势
+const trendRange = ref<TrendRange>('year')
+const trend = ref<TrendStat[]>([])
+const trendLoading = ref(false)
+let trendRequestId = 0
 
 // 图表 option：数据为空时对应卡片改用 el-empty 展示。
 const assetTypeOption = computed(() => assetTypePieOption(overview.value?.by_type ?? []))
 const accountPieChart = computed(() => accountPieOption(overview.value?.by_account ?? []))
-const accountOption = computed(() => accountBarOption(overview.value?.by_account ?? []))
-const monthlyOption = computed(() => monthlyTrendOption(monthly.value, '近 6 个月收支趋势'))
+const trendTitles: Record<TrendRange, string> = {
+  week: '近一周收支趋势',
+  month: '近一月收支趋势',
+  year: '近一年收支趋势',
+}
+const trendOption = computed(() => incomeExpenseTrendOption(trend.value, trendTitles[trendRange.value]))
 
 const hasAssetTypes = computed(() => (overview.value?.by_type.length ?? 0) > 0)
 const hasAccounts = computed(() => (overview.value?.by_account.length ?? 0) > 0)
 
-// 并行拉取总览与趋势数据；总览不传 year/month 时后端默认取当前月。
-async function load() {
+function openAccountAssets(index: number) {
+  const account = overview.value?.by_account.filter((item) => item.amount !== 0)[index]
+  if (account) void router.push({ path: '/assets', query: { account_id: String(account.id) } })
+}
+
+function openTypeAssets(index: number) {
+  const type = overview.value?.by_type.filter((item) => item.amount !== 0)[index]
+  if (type) void router.push({ path: '/assets', query: { asset_type: type.asset_type } })
+}
+
+// 总览不传 year/month 时后端默认取当前月。
+async function loadOverview() {
   if (!store.householdId) {
     return
   }
   try {
-    const [overviewData, monthlyData] = await Promise.all([
-      getOverview(store.householdId, {}),
-      getMonthlyStats(store.householdId, 6),
-    ])
-    overview.value = overviewData
-    monthly.value = monthlyData
+    overview.value = await getOverview(store.householdId, {})
   } catch (error) {
     ElMessage.error((error as Error).message)
   }
 }
 
-onMounted(load)
+async function loadTrend() {
+  if (!store.householdId) return
+  const requestId = ++trendRequestId
+  trend.value = []
+  trendLoading.value = true
+  try {
+    const data = await getTrendStats(store.householdId, trendRange.value)
+    if (requestId === trendRequestId) trend.value = data
+  } catch (error) {
+    if (requestId === trendRequestId) ElMessage.error((error as Error).message)
+  } finally {
+    if (requestId === trendRequestId) trendLoading.value = false
+  }
+}
+
+watch(trendRange, () => void loadTrend())
+onMounted(() => {
+  void loadOverview()
+  void loadTrend()
+})
 </script>
 
 <style scoped>
 .row {
   margin-top: 16px;
+}
+
+.trend-controls {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 8px;
 }
 
 .hero {

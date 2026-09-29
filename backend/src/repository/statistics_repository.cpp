@@ -12,6 +12,21 @@
 
 namespace wt {
 
+std::vector<std::string> StatisticsRepository::transaction_times(
+    std::int64_t household_id, const std::string& from_time,
+    const std::string& to_time) {
+  Statement statement(database_,
+      "SELECT transaction_time FROM transactions "
+      "WHERE household_id = ? AND status = 'NORMAL' "
+      "AND transaction_time >= ? AND transaction_time <= ?;");
+  statement.bind(1, household_id).bind(2, from_time).bind(3, to_time);
+  std::vector<std::string> result;
+  while (statement.step()) {
+    result.push_back(statement.get_text(0));
+  }
+  return result;
+}
+
 // 总资产口径：排除 type='LIABILITY' 的 ACTIVE 资产，对 current_balance（分）求和。
 std::int64_t StatisticsRepository::total_assets(std::int64_t household_id) {
   Statement statement(
@@ -178,19 +193,23 @@ std::vector<NamedAmount> StatisticsRepository::income_expense_by_member(
 // 支出分类口径：status='NORMAL' 且 type='EXPENSE'，按 category 分组，
 // category 为空时归并为 '未分类'，按金额降序。
 std::vector<CategoryAmount> StatisticsRepository::expense_by_category(
-    std::int64_t household_id, const std::string& from_time, const std::string& to_time) {
-  Statement statement(
-      database_,
-      "SELECT COALESCE(c.name, '未分类'), COALESCE(SUM(e.amount), 0) FROM transactions t "
+    std::int64_t household_id, std::optional<std::int64_t> member_id,
+    const std::string& from_time, const std::string& to_time) {
+  std::string sql =
+      "SELECT t.category_id, COALESCE(c.name, '未分类'), COALESCE(SUM(e.amount), 0) FROM transactions t "
       "JOIN transaction_entries e ON e.transaction_id=t.id "
       "LEFT JOIN transaction_category c ON c.id = t.category_id "
       "WHERE t.household_id = ? AND t.status = 'NORMAL' AND t.type = 'EXPENSE' AND e.direction='OUT' "
-      "AND t.transaction_time >= ? AND t.transaction_time <= ? "
-      "GROUP BY t.category_id, c.name ORDER BY 2 DESC;");
+      "AND t.transaction_time >= ? AND t.transaction_time <= ? ";
+  if (member_id) sql += "AND t.owner_member_id = ? ";
+  sql += "GROUP BY t.category_id, c.name ORDER BY 3 DESC;";
+  Statement statement(database_, sql);
   statement.bind(1, household_id).bind(2, from_time).bind(3, to_time);
+  if (member_id) statement.bind(4, *member_id);
   std::vector<CategoryAmount> result;
   while (statement.step()) {
-    result.push_back({statement.get_text(0), statement.get_int64(1)});
+    result.push_back({statement.get_text(1), statement.get_int64(2),
+                      statement.get_optional_int64(0)});
   }
   return result;
 }
@@ -198,19 +217,23 @@ std::vector<CategoryAmount> StatisticsRepository::expense_by_category(
 // 收入分类口径：status='NORMAL' 且 type='INCOME'，按 category 分组，
 // category 为空时归并为 '未分类'，按金额降序。
 std::vector<CategoryAmount> StatisticsRepository::income_by_category(
-    std::int64_t household_id, const std::string& from_time, const std::string& to_time) {
-  Statement statement(
-      database_,
-      "SELECT COALESCE(c.name, '未分类'), COALESCE(SUM(e.amount), 0) FROM transactions t "
+    std::int64_t household_id, std::optional<std::int64_t> member_id,
+    const std::string& from_time, const std::string& to_time) {
+  std::string sql =
+      "SELECT t.category_id, COALESCE(c.name, '未分类'), COALESCE(SUM(e.amount), 0) FROM transactions t "
       "JOIN transaction_entries e ON e.transaction_id=t.id "
       "LEFT JOIN transaction_category c ON c.id = t.category_id "
       "WHERE t.household_id = ? AND t.status = 'NORMAL' AND t.type = 'INCOME' AND e.direction='IN' "
-      "AND t.transaction_time >= ? AND t.transaction_time <= ? "
-      "GROUP BY t.category_id, c.name ORDER BY 2 DESC;");
+      "AND t.transaction_time >= ? AND t.transaction_time <= ? ";
+  if (member_id) sql += "AND t.owner_member_id = ? ";
+  sql += "GROUP BY t.category_id, c.name ORDER BY 3 DESC;";
+  Statement statement(database_, sql);
   statement.bind(1, household_id).bind(2, from_time).bind(3, to_time);
+  if (member_id) statement.bind(4, *member_id);
   std::vector<CategoryAmount> result;
   while (statement.step()) {
-    result.push_back({statement.get_text(0), statement.get_int64(1)});
+    result.push_back({statement.get_text(1), statement.get_int64(2),
+                      statement.get_optional_int64(0)});
   }
   return result;
 }

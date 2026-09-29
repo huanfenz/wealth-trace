@@ -355,6 +355,8 @@ WEALTH_TRACE_CONFIG=/path/to/config.json ./build/backend/wealth-trace
 | GET | `/api/households/{id}/statistics/overview` | 家庭总览 |
 | GET | `/api/households/{id}/statistics/period` | 区间收支统计 |
 | GET | `/api/households/{id}/statistics/monthly` | 近 N 个月收支趋势 |
+| GET | `/api/households/{id}/statistics/trend` | 近一周／近一月／近一年的收支趋势 |
+| GET | `/api/households/{id}/statistics/transaction-days` | 每日交易笔数 |
 | GET | `/api/maintenance/preview` | 每日维护变更预览（不落库） |
 | POST | `/api/maintenance/run` | 手动执行每日维护（幂等） |
 

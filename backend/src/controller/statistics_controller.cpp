@@ -68,6 +68,38 @@ void StatisticsController::register_routes(crow::SimpleApp& app) {
           return data;
         });
       });
+
+  // GET /api/households/<int>/statistics/trend：week/month 按日、year 按月。
+  CROW_ROUTE(app, "/api/households/<int>/statistics/trend").methods("GET"_method)(
+      [this](const crow::request& request, int id) {
+        return http::handle([this, &request, id] {
+          const auto range = http::query_string(request, "range");
+          if (!range.has_value()) {
+            throw invalid_request("range query parameter is required");
+          }
+          nlohmann::json data = nlohmann::json::array();
+          for (const auto& item : service_.trend(id, *range)) {
+            data.push_back(dto::to_json(item));
+          }
+          return data;
+        });
+      });
+
+  CROW_ROUTE(app, "/api/households/<int>/statistics/transaction-days").methods("GET"_method)(
+      [this](const crow::request& request, int id) {
+        return http::handle([this, &request, id] {
+          const auto from = http::query_string(request, "from");
+          const auto to = http::query_string(request, "to");
+          if (!from || !to) {
+            throw invalid_request("from and to query parameters are required");
+          }
+          nlohmann::json data = nlohmann::json::array();
+          for (const auto& item : service_.transaction_days(id, *from, *to)) {
+            data.push_back(dto::to_json(item));
+          }
+          return data;
+        });
+      });
 }
 
 }  // namespace wt

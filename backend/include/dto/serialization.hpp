@@ -60,6 +60,10 @@ nlohmann::json to_json(const TypeAmount& amount);
 nlohmann::json to_json(const CategoryAmount& amount);
 // 单月收支：month（YYYY-MM）、收入 / 支出 / 结余（分）。
 nlohmann::json to_json(const MonthlyIncomeExpense& amount);
+// 收支趋势：period 为业务日期或自然月，金额单位为分。
+nlohmann::json to_json(const IncomeExpenseTrend& amount);
+// 每日正常交易笔数。
+nlohmann::json to_json(const DailyTransactionCount& amount);
 // 家庭总览：资产 / 负债 / 净资产 / 当月收支及多维聚合。
 nlohmann::json to_json(const HouseholdOverview& overview);
 // 区间统计：收支合计、按成员与按分类的聚合。

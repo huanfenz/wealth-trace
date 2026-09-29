@@ -29,6 +29,7 @@ struct TypeAmount {
 struct CategoryAmount {
   std::string category;
   std::int64_t amount = 0;
+  std::optional<std::int64_t> category_id;
 };
 
 // 收入/支出汇总，金额单位均为分。
@@ -81,12 +82,19 @@ class StatisticsRepository {
                                                     const std::string& to_time);
   // 按分类汇总区间支出（type='EXPENSE'，NORMAL），金额降序。
   std::vector<CategoryAmount> expense_by_category(std::int64_t household_id,
+                                                  std::optional<std::int64_t> member_id,
                                                   const std::string& from_time,
                                                   const std::string& to_time);
   // 按分类汇总区间收入（type='INCOME'，NORMAL），金额降序。
   std::vector<CategoryAmount> income_by_category(std::int64_t household_id,
+                                                 std::optional<std::int64_t> member_id,
                                                  const std::string& from_time,
                                                  const std::string& to_time);
+
+  // 指定 UTC 区间内的正常交易时间；每笔业务交易只返回一行。
+  std::vector<std::string> transaction_times(std::int64_t household_id,
+                                             const std::string& from_time,
+                                             const std::string& to_time);
 
  private:
   Database& database_;

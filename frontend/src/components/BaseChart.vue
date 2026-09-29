@@ -32,6 +32,7 @@ const props = withDefaults(
   defineProps<{ option: EChartsOption; height?: string }>(),
   { height: '300px' },
 )
+const emit = defineEmits<{ 'slice-click': [index: number] }>()
 
 const el = ref<HTMLDivElement | null>(null)
 let chart: ReturnType<typeof echarts.init> | null = null
@@ -48,6 +49,11 @@ onMounted(() => {
   }
   chart = echarts.init(el.value)
   render()
+  chart.on('click', (params) => {
+    if (params.componentType === 'series' && params.seriesType === 'pie' && params.dataIndex >= 0) {
+      emit('slice-click', params.dataIndex)
+    }
+  })
   // 侧边栏/窗口尺寸变化时同步图表尺寸。
   observer = new ResizeObserver(() => chart?.resize())
   observer.observe(el.value)

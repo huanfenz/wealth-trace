@@ -18,6 +18,9 @@ import type {
   RecurringInvestmentPlan,
   Transaction,
   TransactionCategory,
+  TrendRange,
+  TrendStat,
+  DailyTransactionCount,
 } from '@/types'
 
 export async function exportDatabase(): Promise<Blob> {
@@ -246,8 +249,11 @@ export interface TransactionQuery {
   assetId?: number       // 按资产筛选
   type?: string          // 按交易类型筛选
   categoryId?: number    // 按分类筛选
+  uncategorized?: boolean // 仅未分类交易
   from?: string          // 起始时间（含）
   to?: string            // 结束时间（含）
+  date?: string          // 业务日期 YYYY-MM-DD；不能与 from/to 同时使用
+  month?: string         // 业务月份 YYYY-MM；不能与 date/from/to 同时使用
   limit?: number         // 每页条数
   offset?: number        // 偏移量（分页）
 }
@@ -262,8 +268,11 @@ export function listTransactions(
     asset_id: query.assetId,
     type: query.type,
     category_id: query.categoryId,
+    uncategorized: query.uncategorized || undefined,
     from: query.from,
     to: query.to,
+    date: query.date,
+    month: query.month,
     limit: query.limit,
     offset: query.offset,
   })
@@ -276,8 +285,11 @@ export function listAssetTransactions(assetId: number, householdId: number, quer
     owner_member_id: query.ownerMemberId,
     type: query.type,
     category_id: query.categoryId,
+    uncategorized: query.uncategorized || undefined,
     from: query.from,
     to: query.to,
+    date: query.date,
+    month: query.month,
     limit: query.limit,
     offset: query.offset,
   })
@@ -363,4 +375,14 @@ export function getPeriod(
 /** 获取近 N 个月收支趋势（按月升序，缺月补零）。 */
 export function getMonthlyStats(householdId: number, months: number): Promise<MonthlyStat[]> {
   return get<MonthlyStat[]>(`/households/${householdId}/statistics/monthly`, { months })
+}
+
+/** 获取收支趋势：week/month 按日，year 按月。 */
+export function getTrendStats(householdId: number, range: TrendRange): Promise<TrendStat[]> {
+  return get<TrendStat[]>(`/households/${householdId}/statistics/trend`, { range })
+}
+
+/** 获取业务日期范围内每天的正常交易笔数。 */
+export function getTransactionDays(householdId: number, from: string, to: string): Promise<DailyTransactionCount[]> {
+  return get<DailyTransactionCount[]>(`/households/${householdId}/statistics/transaction-days`, { from, to })
 }

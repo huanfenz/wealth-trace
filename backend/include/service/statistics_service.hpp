@@ -42,6 +42,19 @@ struct PeriodStatistics {
   std::vector<CategoryAmount> expense_categories;
 };
 
+// 收支趋势数据点：period 按查询范围为 YYYY-MM-DD 或 YYYY-MM。
+struct IncomeExpenseTrend {
+  std::string period;
+  std::int64_t income = 0;
+  std::int64_t expense = 0;
+  std::int64_t balance() const { return income - expense; }
+};
+
+struct DailyTransactionCount {
+  std::string date;
+  std::int64_t count = 0;
+};
+
 // 统计服务：只读聚合，不修改任何数据。所有金额为分，时间为 UTC 字符串。
 // 统计一律只计入 status=ACTIVE 的资产与 status=NORMAL 的流水。
 class StatisticsService {
@@ -64,6 +77,16 @@ class StatisticsService {
   // 近 N 个月收支趋势：以当前月为终点往前推 N-1 个月，按月汇总收支并补零缺月，
   // 按月份升序返回。months 超出 1..36 抛 invalid_request。
   std::vector<MonthlyIncomeExpense> monthly(std::int64_t household_id, int months);
+
+  // week/month 为含今天的最近 7/30 个业务日；year 为含当前月的 12 个自然月。
+  // 按时间升序返回，缺少流水的日期或月份补零。
+  std::vector<IncomeExpenseTrend> trend(std::int64_t household_id,
+                                       const std::string& range);
+
+  // 按业务日期统计全部正常交易，包含端点并为无交易日期补零。
+  std::vector<DailyTransactionCount> transaction_days(
+      std::int64_t household_id, const std::string& from_date,
+      const std::string& to_date);
 
  private:
   // 前置校验：家庭必须存在，否则抛 not_found。

@@ -348,7 +348,8 @@ nlohmann::json to_json(const TypeAmount& amount) {
 
 // 按收支分类聚合：分类名 + 金额（分）。
 nlohmann::json to_json(const CategoryAmount& amount) {
-  return {{"category", amount.category}, {"amount", amount.amount}};
+  return {{"category", amount.category}, {"amount", amount.amount},
+          {"category_id", optional_int(amount.category_id)}};
 }
 
 // 单月收支：month 为 "YYYY-MM"，income/expense/balance 单位均为分。
@@ -357,6 +358,17 @@ nlohmann::json to_json(const MonthlyIncomeExpense& amount) {
           {"income", amount.income},
           {"expense", amount.expense},
           {"balance", amount.balance()}};
+}
+
+nlohmann::json to_json(const IncomeExpenseTrend& amount) {
+  return {{"period", amount.period},
+          {"income", amount.income},
+          {"expense", amount.expense},
+          {"balance", amount.balance()}};
+}
+
+nlohmann::json to_json(const DailyTransactionCount& amount) {
+  return {{"date", amount.date}, {"count", amount.count}};
 }
 
 // 家庭总览：总资产 / 总负债 / 净资产 / 当月收入 / 支出 / 结余，

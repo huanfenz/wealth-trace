@@ -9,10 +9,28 @@
     </div>
 
     <div class="toolbar" :class="{ 'is-multi-selecting': multiSelectMode }">
-      <el-select v-model="filterMember" clearable placeholder="按成员" style="width: 150px" @change="reload">
+      <el-date-picker
+        v-model="filterDate"
+        type="date"
+        value-format="YYYY-MM-DD"
+        clearable
+        placeholder="按日期"
+        style="width: 160px"
+        @change="onDateChange"
+      />
+      <el-date-picker
+        v-model="filterMonth"
+        type="month"
+        value-format="YYYY-MM"
+        clearable
+        placeholder="按月份"
+        style="width: 160px"
+        @change="onMonthChange"
+      />
+      <el-select v-model="filterMember" clearable placeholder="按成员" style="width: 150px" @change="syncFilters">
         <el-option v-for="m in store.members" :key="m.id" :label="m.name" :value="m.id" />
       </el-select>
-      <el-select v-model="filterAsset" clearable filterable placeholder="按资产" style="width: 220px" @change="reload">
+      <el-select v-model="filterAsset" clearable filterable placeholder="按资产" style="width: 220px" @change="syncFilters">
         <el-option
           v-for="a in store.assets"
           :key="a.id"
@@ -20,14 +38,15 @@
           :value="a.id"
         />
       </el-select>
-      <el-select v-model="filterType" clearable placeholder="按类型" style="width: 140px" @change="reload">
+      <el-select v-model="filterType" clearable placeholder="按类型" style="width: 140px" @change="syncFilters">
         <el-option v-for="(label, value) in transactionTypeLabels" :key="value" :label="label" :value="value" />
       </el-select>
-      <el-select v-model="filterCategory" clearable filterable placeholder="按分类" style="width: 180px" @change="reload">
+      <el-select v-model="filterCategory" clearable filterable placeholder="按分类" style="width: 180px" @change="syncFilters">
+        <el-option label="未分类" :value="0" />
         <el-option
-          v-for="category in store.categories.filter((item) => item.active)"
+          v-for="category in store.categories"
           :key="category.id"
-          :label="`${category.type === 'INCOME' ? '收入' : '支出'} · ${category.name}`"
+          :label="`${category.type === 'INCOME' ? '收入' : '支出'} · ${category.name}${category.active ? '' : '（已停用）'}`"
           :value="category.id"
         />
       </el-select>
@@ -225,7 +244,9 @@
 
 <script setup lang="ts">
 // 职责：展示和新增完整业务交易；收入、支出、转账与调整使用对应业务接口。
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
+import dayjs from 'dayjs'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Edit, Minus, Plus, Sort } from '@element-plus/icons-vue'
 
@@ -250,6 +271,23 @@ type DialogKind = 'income' | 'expense' | 'transfer' | 'adjustment' // 弹窗形�
 type DeleteMode = 'records' | 'rollback'
 
 const store = useAppStore()
+const route = useRoute()
+const router = useRouter()
+function routeDate(): string | null {
+  const value = route.query.date
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null
+  return dayjs(value).isValid() && dayjs(value).format('YYYY-MM-DD') === value ? value : null
+}
+function routeMonth(): string | null {
+  const value = route.query.month
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}$/.test(value)) return null
+  return dayjs(`${value}-01`).isValid() && dayjs(`${value}-01`).format('YYYY-MM') === value ? value : null
+}
+function routeId(value: unknown): number | undefined {
+  if (typeof value !== 'string' || !/^[1-9]\d*$/.test(value)) return undefined
+  const id = Number(value)
+  return Number.isSafeInteger(id) ? id : undefined
+}
 const transactions = ref<Transaction[]>([]) // 当前页流水
 const selectedTransactions = ref<Transaction[]>([])
 const { actionCardId, pressedCardId, multiSelectMode, selectedIds, onPointerDown, onPointerMove, onPointerEnd, onCardClick, onContextMenu, toggleSelection, cancelSelection, closeActions } = useMobileCardInteractions(selectedTransactions)
@@ -258,11 +296,26 @@ const saving = ref(false)                   // 表单提交中
 const total = ref(0)                        // 总条数
 const page = ref(1)                         // 当前页码
 const pageSize = 20                         // 每页条数
+let listRequestId = 0
 
+const filterDate = ref<string | null>(routeDate()) // 业务日期筛选
+const filterMonth = ref<string | null>(routeMonth()) // 业务月份筛选
 const filterMember = ref<number | undefined>(undefined) // 按成员筛选
 const filterAsset = ref<number | undefined>(undefined)  // 按资产筛选
 const filterType = ref<string | undefined>(undefined)   // 按交易类型筛选
 const filterCategory = ref<number | undefined>(undefined) // 按分类筛选
+
+function applyRouteFilters() {
+  filterDate.value = routeDate()
+  filterMonth.value = filterDate.value ? null : routeMonth()
+  filterMember.value = routeId(route.query.member_id)
+  filterAsset.value = routeId(route.query.asset_id)
+  const type = route.query.type
+  filterType.value = typeof type === 'string' && type in transactionTypeLabels ? type : undefined
+  filterCategory.value = route.query.uncategorized === 'true' ? 0 : routeId(route.query.category_id)
+}
+
+applyRouteFilters()
 const dialogVisible = ref(false)      // 弹窗显隐
 const kind = ref<DialogKind>('income') // 当前弹窗形态
 const deleteDialogVisible = ref(false)
@@ -376,25 +429,31 @@ async function load() {
     return
   }
   selectedTransactions.value = []
+  const requestId = ++listRequestId
   loading.value = true
   try {
     const query = {
       ownerMemberId: filterMember.value,
       assetId: filterAsset.value,
       type: filterType.value,
-      categoryId: filterCategory.value,
+      categoryId: filterCategory.value && filterCategory.value > 0 ? filterCategory.value : undefined,
+      uncategorized: filterCategory.value === 0,
+      date: filterDate.value || undefined,
+      month: filterDate.value ? undefined : filterMonth.value || undefined,
       limit: pageSize,
       offset: (page.value - 1) * pageSize,
     }
     const result = filterAsset.value
       ? await listAssetTransactions(filterAsset.value, store.householdId, query)
       : await listTransactions(store.householdId, query)
-    transactions.value = result.items
-    total.value = result.total
+    if (requestId === listRequestId) {
+      transactions.value = result.items
+      total.value = result.total
+    }
   } catch (error) {
-    ElMessage.error((error as Error).message)
+    if (requestId === listRequestId) ElMessage.error((error as Error).message)
   } finally {
-    loading.value = false
+    if (requestId === listRequestId) loading.value = false
   }
 }
 
@@ -403,6 +462,33 @@ function reload() {
   page.value = 1
   void load()
 }
+
+function syncFilters() {
+  void router.replace({ query: {
+    date: filterDate.value || undefined,
+    month: filterDate.value ? undefined : filterMonth.value || undefined,
+    member_id: filterMember.value ? String(filterMember.value) : undefined,
+    asset_id: filterAsset.value ? String(filterAsset.value) : undefined,
+    type: filterType.value,
+    category_id: filterCategory.value && filterCategory.value > 0 ? String(filterCategory.value) : undefined,
+    uncategorized: filterCategory.value === 0 ? 'true' : undefined,
+  } })
+}
+
+function onDateChange(value: string | null) {
+  if (value) filterMonth.value = null
+  syncFilters()
+}
+
+function onMonthChange(value: string | null) {
+  if (value) filterDate.value = null
+  syncFilters()
+}
+
+watch(() => route.query, () => {
+  applyRouteFilters()
+  reload()
+})
 
 // 翻页查询。
 function onPage(next: number) {

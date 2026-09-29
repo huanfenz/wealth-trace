@@ -9,7 +9,11 @@
       <el-menu :default-active="activeMenu" router class="menu">
         <el-menu-item index="/dashboard">
           <el-icon><DataAnalysis /></el-icon>
-          <span>家庭总览</span>
+          <span>资产总览</span>
+        </el-menu-item>
+        <el-menu-item index="/statistics">
+          <el-icon><TrendCharts /></el-icon>
+          <span>收支统计</span>
         </el-menu-item>
         <el-menu-item index="/members">
           <el-icon><User /></el-icon>
@@ -34,10 +38,6 @@
         <el-menu-item index="/investments">
           <el-icon><Clock /></el-icon>
           <span>定投管理</span>
-        </el-menu-item>
-        <el-menu-item index="/statistics">
-          <el-icon><TrendCharts /></el-icon>
-          <span>收支统计</span>
         </el-menu-item>
         <el-menu-item index="/data-backup">
           <el-icon><FolderOpened /></el-icon>
@@ -67,14 +67,14 @@
 
   <el-drawer v-model="menuVisible" title="财迹 · 家庭资产管理" direction="ltr" size="min(82vw, 300px)" class="mobile-nav-drawer">
     <el-menu :default-active="activeMenu" router class="menu mobile-menu" @select="menuVisible = false">
-      <el-menu-item index="/dashboard"><el-icon><DataAnalysis /></el-icon><span>家庭总览</span></el-menu-item>
+      <el-menu-item index="/dashboard"><el-icon><DataAnalysis /></el-icon><span>资产总览</span></el-menu-item>
+      <el-menu-item index="/statistics"><el-icon><TrendCharts /></el-icon><span>收支统计</span></el-menu-item>
       <el-menu-item index="/members"><el-icon><User /></el-icon><span>成员管理</span></el-menu-item>
       <el-menu-item index="/accounts"><el-icon><CreditCard /></el-icon><span>账户管理</span></el-menu-item>
       <el-menu-item index="/assets"><el-icon><Wallet /></el-icon><span>资产管理</span></el-menu-item>
       <el-menu-item index="/transactions"><el-icon><Tickets /></el-icon><span>收支与转账</span></el-menu-item>
       <el-menu-item index="/categories"><el-icon><CollectionTag /></el-icon><span>分类管理</span></el-menu-item>
       <el-menu-item index="/investments"><el-icon><Clock /></el-icon><span>定投管理</span></el-menu-item>
-      <el-menu-item index="/statistics"><el-icon><TrendCharts /></el-icon><span>收支统计</span></el-menu-item>
       <el-menu-item index="/data-backup"><el-icon><FolderOpened /></el-icon><span>数据备份</span></el-menu-item>
     </el-menu>
   </el-drawer>

@@ -457,7 +457,11 @@
 | `owner_member_id` | 按成员过滤 |
 | `asset_id` | 按资产过滤 |
 | `type` | INCOME/EXPENSE/TRANSFER/INVESTMENT/ADJUSTMENT |
+| `category_id` | 按分类 ID 过滤 |
+| `uncategorized` | `true` 时仅返回分类 ID 为空的交易；若同时提供 `category_id`，则以 `category_id` 为准 |
 | `from` / `to` | 时间范围（`YYYY-MM-DD HH:MM:SS`，含端点） |
+| `date` | 业务日期 `YYYY-MM-DD`；按业务时区筛选当天，不能与 `month` / `from` / `to` 同时使用 |
+| `month` | 业务月份 `YYYY-MM`；按业务时区筛选整月，不能与 `date` / `from` / `to` 同时使用 |
 | `limit` | 1..1000，默认 200 |
 | `offset` | 默认 0 |
 
@@ -472,6 +476,7 @@
 ### `GET /api/assets/{asset_id}/transactions?household_id={id}`
 
 资产视角流水。转账会按当前资产对应 Entry 展示 `IN` 或 `OUT`，同时在副标题中给出对端资产名称。
+同样支持 `date`、`month`、`category_id` 和 `uncategorized` 参数。
 
 ### `POST /api/households/{id}/transactions`
 
@@ -674,10 +679,12 @@ Entry、历史余额快照和资产当前余额不变；转账、投资、余额
   "expense": 80000,
   "balance": 920000,
   "by_member": [ { "id": 1, "name": "王鹏", "amount": 920000 } ],
-  "income_categories": [ { "category": "工资", "amount": 1000000 } ],
-  "expense_categories": [ { "category": "餐饮", "amount": 50000 } ]
+  "income_categories": [ { "category_id": 1, "category": "工资", "amount": 1000000 } ],
+  "expense_categories": [ { "category_id": 2, "category": "餐饮", "amount": 50000 } ]
 }
 ```
+
+分类统计随 `owner_member_id` 筛选；未分类项的 `category_id` 为 `null`。
 
 ### `GET /api/households/{id}/statistics/monthly?months=6`
 
@@ -687,6 +694,30 @@ Entry、历史余额快照和资产当前余额不变；转账、投资、余额
 [
   { "month": "2026-04", "income": 0, "expense": 0, "balance": 0 },
   { "month": "2026-05", "income": 1000000, "expense": 80000, "balance": 920000 }
+]
+```
+
+### `GET /api/households/{id}/statistics/trend?range=month`
+
+家庭总览收支趋势。`range` 必填，可取 `week`（含今天的最近 7 天，按日）、`month`（含今天的最近 30 天，按日）或 `year`（含当前月的最近 12 个自然月，按月）。按业务时区计算日期边界，按时间升序返回，缺少流水的日期或月份补零。仅统计正常状态的收入和支出流水；金额单位为分。
+
+```json
+[
+  { "period": "2026-09-28", "income": 0, "expense": 0, "balance": 0 },
+  { "period": "2026-09-29", "income": 100000, "expense": 20000, "balance": 80000 }
+]
+```
+
+`week` 和 `month` 的 `period` 格式为 `YYYY-MM-DD`；`year` 的格式为 `YYYY-MM`。
+
+### `GET /api/households/{id}/statistics/transaction-days?from=2026-09-01&to=2026-09-30`
+
+按业务时区统计每日正常交易笔数，含起止日期，最多查询 366 天。收入、支出、转账、投资和余额调整各按一笔计数；缺少交易的日期补零。
+
+```json
+[
+  { "date": "2026-09-01", "count": 0 },
+  { "date": "2026-09-02", "count": 3 }
 ]
 ```
 

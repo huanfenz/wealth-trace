@@ -9,7 +9,13 @@ const router = createRouter({
       path: '/dashboard',
       name: 'dashboard',
       component: () => import('@/views/DashboardView.vue'),
-      meta: { title: '家庭总览' },
+      meta: { title: '资产总览' },
+    },
+    {
+      path: '/statistics',
+      name: 'statistics',
+      component: () => import('@/views/StatisticsView.vue'),
+      meta: { title: '收支统计' },
     },
     {
       path: '/members',
@@ -46,12 +52,6 @@ const router = createRouter({
       name: 'investments',
       component: () => import('@/views/RecurringInvestmentsView.vue'),
       meta: { title: '定投管理' },
-    },
-    {
-      path: '/statistics',
-      name: 'statistics',
-      component: () => import('@/views/StatisticsView.vue'),
-      meta: { title: '收支统计' },
     },
     {
       path: '/data-backup',

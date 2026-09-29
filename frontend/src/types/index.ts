@@ -243,6 +243,7 @@ export interface TypeAmount {
 export interface CategoryAmount {
   category: string
   amount: number // 金额（分）
+  category_id: number | null
 }
 
 /** 家庭总览统计结果。 */
@@ -276,6 +277,21 @@ export interface MonthlyStat {
   income: number // 收入（分）
   expense: number // 支出（分）
   balance: number // 结余（分）
+}
+
+export type TrendRange = 'week' | 'month' | 'year'
+
+/** 收支趋势数据点；period 按范围为 YYYY-MM-DD 或 YYYY-MM。 */
+export interface TrendStat {
+  period: string
+  income: number // 收入（分）
+  expense: number // 支出（分）
+  balance: number // 结余（分）
+}
+
+export interface DailyTransactionCount {
+  date: string // 业务日期 YYYY-MM-DD
+  count: number // 正常交易笔数
 }
 
 /** 创建资产时的「添加时维护」单条变更：某日期字段推进前后值。 */

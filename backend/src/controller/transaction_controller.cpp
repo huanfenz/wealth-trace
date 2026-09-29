@@ -7,6 +7,7 @@
 #include "dto/json_helpers.hpp"
 #include "dto/serialization.hpp"
 #include "model/enums.hpp"
+#include "utils/time_util.hpp"
 
 namespace wt { namespace {
 std::optional<std::string> body_time(const nlohmann::json& b){return dto::optional_string(b,"transaction_time",19);}
@@ -19,11 +20,36 @@ TransactionInput transaction_input(const nlohmann::json& body){
   for(const auto& row:body["entries"]){if(!row.is_object())throw invalid_request("entry must be an object");const auto dir=parse_transaction_direction(dto::require_string(row,"direction",8));if(!dir)throw invalid_request("invalid entry direction");in.entries.push_back({dto::require_int64(row,"asset_id"),*dir,dto::require_int64(row,"amount")});}
   return in;
 }
+void apply_date_filter(const crow::request& request, TransactionQuery& query) {
+  const auto date = http::query_string(request, "date");
+  const auto month = http::query_string(request, "month");
+  if (!date && !month) return;
+  if (query.from_time || query.to_time) {
+    throw invalid_request("date or month cannot be combined with from or to");
+  }
+  if (date && month) throw invalid_request("date cannot be combined with month");
+  if (month) {
+    if (month->size() != 7) throw invalid_request("month must be YYYY-MM");
+    const auto first = time_util::require_date(*month + "-01", "month");
+    const auto next = time_util::add_days(first, 32).substr(0, 7) + "-01";
+    const auto last = time_util::add_days(next, -1);
+    query.from_time = time_util::business_to_utc(first + " 00:00:00");
+    query.to_time = time_util::business_to_utc(last + " 23:59:59");
+    return;
+  }
+  const auto day = time_util::require_date(*date, "date");
+  if (time_util::add_days(day, 0) != day) {
+    throw invalid_request("date must be a valid calendar date");
+  }
+  query.from_time = time_util::business_to_utc(day + " 00:00:00");
+  query.to_time = time_util::business_to_utc(day + " 23:59:59");
+}
 nlohmann::json list_query(const crow::request& request,int household,TransactionService& service){
   TransactionQuery q;q.household_id=household;q.owner_member_id=http::query_int64(request,"owner_member_id");q.asset_id=http::query_int64(request,"asset_id");
   q.category_id=http::query_int64(request,"category_id");
+  q.uncategorized=http::query_string(request,"uncategorized")=="true";
   if(const auto type=http::query_string(request,"type");type){q.type=parse_transaction_type(*type);if(!q.type)throw invalid_request("invalid transaction type");}
-  q.from_time=http::query_string(request,"from");q.to_time=http::query_string(request,"to");q.limit=http::query_int(request,"limit",200);q.offset=http::query_int(request,"offset",0);
+  q.from_time=http::query_string(request,"from");q.to_time=http::query_string(request,"to");apply_date_filter(request,q);q.limit=http::query_int(request,"limit",200);q.offset=http::query_int(request,"offset",0);
   if(q.limit<=0||q.limit>1000||q.offset<0)throw invalid_request("invalid pagination");nlohmann::json items=nlohmann::json::array();for(const auto& t:service.list_dto(q))items.push_back(dto::to_json(t));return {{"total",service.count(q)},{"items",items}};
 }
 }
@@ -36,7 +62,7 @@ void TransactionController::register_routes(crow::SimpleApp& app){
  CROW_ROUTE(app,"/api/households/<int>/transactions/adjustment").methods("POST"_method)([this](const crow::request&r,int h){return http::handle([this,&r,h]{auto b=dto::parse_object(r.body);auto t=service_.record_adjustment(h,dto::require_int64(b,"asset_id"),dto::require_int64(b,"amount"),body_time(b).value_or(""),body_remark(b));return dto::to_json(service_.dto(t.id));});});
  CROW_ROUTE(app,"/api/households/<int>/transfers").methods("POST"_method)([this](const crow::request&r,int h){return http::handle([this,&r,h]{auto b=dto::parse_object(r.body);auto t=service_.transfer(h,dto::require_int64(b,"from_asset_id"),dto::require_int64(b,"to_asset_id"),dto::require_int64(b,"amount"),body_time(b).value_or(""),body_remark(b));return dto::to_json(service_.dto(t.id));});});
  CROW_ROUTE(app,"/api/households/<int>/investments/buy").methods("POST"_method)([this](const crow::request&r,int h){return http::handle([this,&r,h]{auto b=dto::parse_object(r.body);auto t=service_.investment_buy(h,dto::require_int64(b,"from_asset_id"),dto::require_int64(b,"to_asset_id"),dto::require_int64(b,"amount"),body_time(b).value_or(""),body_remark(b));return dto::to_json(service_.dto(t.id));});});
- CROW_ROUTE(app,"/api/assets/<int>/transactions").methods("GET"_method)([this](const crow::request&r,int asset){return http::handle([this,&r,asset]{const auto h=http::query_int64(r,"household_id");if(!h)throw invalid_request("household_id is required");TransactionQuery q;q.household_id=*h;q.owner_member_id=http::query_int64(r,"owner_member_id");q.category_id=http::query_int64(r,"category_id");q.from_time=http::query_string(r,"from");q.to_time=http::query_string(r,"to");q.limit=http::query_int(r,"limit",200);q.offset=http::query_int(r,"offset",0);if(const auto type=http::query_string(r,"type");type){q.type=parse_transaction_type(*type);if(!q.type)throw invalid_request("invalid transaction type");}if(q.limit<=0||q.limit>1000||q.offset<0)throw invalid_request("invalid pagination");auto rows=service_.list_asset_dto(asset,q);q.asset_id=asset;nlohmann::json result=nlohmann::json::array();for(const auto& t:rows)result.push_back(dto::to_json(t));return nlohmann::json{{"total",service_.count(q)},{"items",result}};});});
+ CROW_ROUTE(app,"/api/assets/<int>/transactions").methods("GET"_method)([this](const crow::request&r,int asset){return http::handle([this,&r,asset]{const auto h=http::query_int64(r,"household_id");if(!h)throw invalid_request("household_id is required");TransactionQuery q;q.household_id=*h;q.owner_member_id=http::query_int64(r,"owner_member_id");q.category_id=http::query_int64(r,"category_id");q.uncategorized=http::query_string(r,"uncategorized")=="true";q.from_time=http::query_string(r,"from");q.to_time=http::query_string(r,"to");apply_date_filter(r,q);q.limit=http::query_int(r,"limit",200);q.offset=http::query_int(r,"offset",0);if(const auto type=http::query_string(r,"type");type){q.type=parse_transaction_type(*type);if(!q.type)throw invalid_request("invalid transaction type");}if(q.limit<=0||q.limit>1000||q.offset<0)throw invalid_request("invalid pagination");auto rows=service_.list_asset_dto(asset,q);q.asset_id=asset;nlohmann::json result=nlohmann::json::array();for(const auto& t:rows)result.push_back(dto::to_json(t));return nlohmann::json{{"total",service_.count(q)},{"items",result}};});});
  CROW_ROUTE(app,"/api/transactions/<int>").methods("GET"_method)([this](int id){return http::handle([this,id]{return dto::to_json(service_.dto(id));});});
  CROW_ROUTE(app,"/api/transactions/<int>").methods("PUT"_method)([this](const crow::request&r,int id){return http::handle([this,&r,id]{auto rollback=http::query_string(r,"rollback_assets");if(rollback&&*rollback!="true"&&*rollback!="false")throw invalid_request("rollback_assets must be true or false");auto t=service_.update(id,transaction_input(dto::parse_object(r.body)),!rollback||*rollback=="true");return dto::to_json(service_.dto(t.id));});});
  CROW_ROUTE(app,"/api/transactions/<int>/category").methods("PUT"_method)([this](const crow::request&r,int id){return http::handle([this,&r,id]{auto b=dto::parse_object(r.body);if(!b.contains("category_id"))throw invalid_request("category_id is required");auto t=service_.update_category(id,dto::optional_int64(b,"category_id"));return dto::to_json(service_.dto(t.id));});});

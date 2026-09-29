@@ -15,6 +15,7 @@ struct TransactionQuery {
   std::optional<std::int64_t> owner_member_id;
   std::optional<std::int64_t> asset_id;
   std::optional<std::int64_t> category_id;
+  bool uncategorized = false;
   std::optional<TransactionType> type;
   std::optional<std::string> from_time;
   std::optional<std::string> to_time;

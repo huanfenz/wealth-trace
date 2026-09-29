@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
+#include <map>
 #include <optional>
 #include <string>
 #include <utility>
@@ -98,7 +99,7 @@ PeriodStatistics StatisticsService::period(
   const std::string to_utc = time_util::business_to_utc(result.to_time);
 
   // 收支口径：只汇总 INCOME/EXPENSE，转账/调整不计入，避免内部流转被
-  // 误当成收入或支出。member_id 只作用于总收支，不改变下面的分布统计。
+  // 误当成收入或支出。分类分布与总收支使用相同的成员范围。
   const auto summary =
       statistics_.income_expense(household_id, member_id, from_utc, to_utc);
   result.income = summary.income;
@@ -108,9 +109,9 @@ PeriodStatistics StatisticsService::period(
   result.by_member =
       statistics_.income_expense_by_member(household_id, from_utc, to_utc);
   result.expense_categories =
-      statistics_.expense_by_category(household_id, from_utc, to_utc);
+      statistics_.expense_by_category(household_id, member_id, from_utc, to_utc);
   result.income_categories =
-      statistics_.income_by_category(household_id, from_utc, to_utc);
+      statistics_.income_by_category(household_id, member_id, from_utc, to_utc);
   return result;
 }
 
@@ -151,6 +152,69 @@ std::vector<MonthlyIncomeExpense> StatisticsService::monthly(std::int64_t househ
     row.income = summary.income;
     row.expense = summary.expense;
     result.push_back(row);
+  }
+  return result;
+}
+
+std::vector<IncomeExpenseTrend> StatisticsService::trend(
+    std::int64_t household_id, const std::string& range) {
+  if (range == "year") {
+    const auto months = monthly(household_id, 12);
+    std::vector<IncomeExpenseTrend> result;
+    result.reserve(months.size());
+    for (const auto& item : months) {
+      result.push_back({item.month, item.income, item.expense});
+    }
+    return result;
+  }
+  if (range != "week" && range != "month") {
+    throw invalid_request("range must be week, month or year");
+  }
+
+  std::scoped_lock lock(database_.mutex());
+  require_household(household_id);
+  const int days = range == "week" ? 7 : 30;
+  const std::string today = time_util::business_today();
+  std::vector<IncomeExpenseTrend> result;
+  result.reserve(days);
+  for (int i = days - 1; i >= 0; --i) {
+    const std::string date = time_util::add_days(today, -i);
+    const std::string from = time_util::business_to_utc(date + " 00:00:00");
+    const std::string to = time_util::business_to_utc(date + " 23:59:59");
+    const auto summary = statistics_.income_expense(household_id, std::nullopt, from, to);
+    result.push_back({date, summary.income, summary.expense});
+  }
+  return result;
+}
+
+std::vector<DailyTransactionCount> StatisticsService::transaction_days(
+    std::int64_t household_id, const std::string& from_date,
+    const std::string& to_date) {
+  const auto from = time_util::require_date(from_date, "from");
+  const auto to = time_util::require_date(to_date, "to");
+  if (time_util::add_days(from, 0) != from ||
+      time_util::add_days(to, 0) != to) {
+    throw invalid_request("from and to must be valid calendar dates");
+  }
+  const auto span = time_util::days_between(from, to);
+  if (span < 0 || span >= 366) {
+    throw invalid_request("date range must contain 1 to 366 days");
+  }
+
+  std::scoped_lock lock(database_.mutex());
+  require_household(household_id);
+  const auto from_utc = time_util::business_to_utc(from + " 00:00:00");
+  const auto to_utc = time_util::business_to_utc(to + " 23:59:59");
+  std::map<std::string, std::int64_t> counts;
+  for (const auto& utc_time : statistics_.transaction_times(household_id, from_utc, to_utc)) {
+    ++counts[time_util::utc_to_business(utc_time).substr(0, 10)];
+  }
+
+  std::vector<DailyTransactionCount> result;
+  result.reserve(static_cast<std::size_t>(span + 1));
+  for (std::int64_t i = 0; i <= span; ++i) {
+    const auto date = time_util::add_days(from, i);
+    result.push_back({date, counts[date]});
   }
   return result;
 }

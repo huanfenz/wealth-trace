@@ -14,6 +14,9 @@
       <el-select v-model="filterAccount" clearable placeholder="按账户" style="width: 180px" @change="load">
         <el-option v-for="a in store.accounts" :key="a.id" :label="a.name" :value="a.id" />
       </el-select>
+      <el-select v-model="filterType" clearable placeholder="按资产类型" style="width: 160px" @change="load">
+        <el-option v-for="(label, value) in assetTypeLabels" :key="value" :label="label" :value="value" />
+      </el-select>
       <div class="spacer" />
     </div>
 
@@ -336,8 +339,8 @@
 
 <script setup lang="ts">
 // 职责：展示/维护资产列表；弹窗表单按 asset_type 切换明细块，负责「元↔分」「百分数↔定点利率」换算后提交。
-import { computed, onMounted, reactive, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Refresh } from '@element-plus/icons-vue'
 
@@ -363,6 +366,7 @@ import { percentToScaled, scaledToPercent, toMinor, toYuanInput } from '@/utils/
 import type { Asset, AssetStatus, AssetType, HoldingMode, TermUnit } from '@/types'
 
 const store = useAppStore()
+const route = useRoute()
 const router = useRouter()
 
 function openInvestment(asset: Asset) {
@@ -379,6 +383,20 @@ const editing = ref<Asset | null>(null) // 当前编辑对象，null 表示新�
 const appendSource = ref<Asset | null>(null)
 const filterMember = ref<number | undefined>(undefined)  // 按成员筛选
 const filterAccount = ref<number | undefined>(undefined) // 按账户筛选
+const filterType = ref<AssetType | undefined>(undefined) // 按资产类型筛选
+
+function applyRouteFilters() {
+  const accountId = Number(route.query.account_id)
+  filterAccount.value = Number.isSafeInteger(accountId) && accountId > 0 ? accountId : undefined
+  const type = route.query.asset_type
+  filterType.value = typeof type === 'string' && type in assetTypeLabels ? type as AssetType : undefined
+}
+
+applyRouteFilters()
+watch(() => [route.query.account_id, route.query.asset_type], () => {
+  applyRouteFilters()
+  void load()
+})
 
 // 维护涉及的日期字段中文名，用于「添加时维护 / 手动维护」确认弹框展示。
 const maintenanceFieldLabels: Record<string, string> = {
@@ -583,10 +601,11 @@ async function load() {
   selectedAssets.value = []
   loading.value = true
   try {
-    assets.value = await listAssets(store.householdId, {
+    const rows = await listAssets(store.householdId, {
       ownerMemberId: filterMember.value,
       accountId: filterAccount.value,
     })
+    assets.value = filterType.value ? rows.filter((asset) => asset.asset_type === filterType.value) : rows
     await store.refreshAssets()
   } catch (error) {
     ElMessage.error((error as Error).message)
