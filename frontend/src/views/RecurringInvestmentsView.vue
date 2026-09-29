@@ -1,18 +1,20 @@
 <template>
   <div>
-    <div class="toolbar">
+    <div class="toolbar" :class="{ 'is-multi-selecting': multiSelectMode }">
       <el-button type="primary" :icon="Plus" @click="openCreate()">新增定投</el-button>
       <el-button :icon="Refresh" @click="load">刷新</el-button>
-      <el-button :disabled="selectedPlans.length === 0" @click="bulkPause">批量暂停</el-button>
-      <el-button type="success" :disabled="selectedPlans.length === 0" @click="bulkExecute">批量执行</el-button>
-      <el-button type="danger" :disabled="selectedPlans.length === 0" @click="bulkRemove">批量删除</el-button>
+      <el-button class="mobile-batch-action" :disabled="selectedPlans.length === 0" @click="bulkPause">批量暂停</el-button>
+      <el-button class="mobile-batch-action" type="success" :disabled="selectedPlans.length === 0" @click="bulkExecute">批量执行</el-button>
+      <el-button class="mobile-batch-action" type="danger" :disabled="selectedPlans.length === 0" @click="bulkRemove">批量删除</el-button>
       <span v-if="selectedPlans.length" class="selection-count">已选 {{ selectedPlans.length }} 项</span>
+      <el-button v-if="multiSelectMode" class="mobile-multi-cancel" @click="cancelSelection">取消多选</el-button>
     </div>
     <div class="mobile-records">
       <el-empty v-if="!loading && plans.length === 0" description="还没有定投计划" />
-      <el-card v-for="row in plans" :key="row.id" shadow="never" class="mobile-record-card">
+      <div v-if="plans.length" class="mobile-actions-hint">轻点显示操作；长按开始多选，再点卡片勾选；点“取消多选”退出。</div>
+      <el-card v-for="row in plans" :key="row.id" shadow="never" class="mobile-record-card" :class="{ 'is-pressed': pressedCardId === `plan-${row.id}`, 'is-selected': multiSelectMode && selectedIds.has(row.id) }" @pointerdown="onPointerDown(`plan-${row.id}`, $event, planSelectable(row) ? row : undefined)" @pointermove="onPointerMove" @pointerup="onPointerEnd" @pointercancel="onPointerEnd" @click="onCardClick(`plan-${row.id}`, planSelectable(row) ? row : undefined)" @contextmenu="onContextMenu">
         <div class="mobile-record-heading">
-          <el-checkbox :model-value="selectedPlans.some((item) => item.id === row.id)" :disabled="!planSelectable(row)" aria-label="选择定投计划" @change="togglePlanSelection(row, $event)" />
+          <el-checkbox v-if="multiSelectMode" :model-value="selectedIds.has(row.id)" :disabled="!planSelectable(row)" :aria-label="`选择${assetName(row.target_asset_id)}`" @click.stop @change="toggleSelection(row)" />
           <div class="mobile-record-title">{{ assetName(row.target_asset_id) }}<div class="mobile-record-meta">付款资产：{{ assetName(row.source_asset_id) }}</div></div>
           <el-tag :type="row.status === 'ACTIVE' ? 'success' : row.status === 'PAUSED' ? 'warning' : 'info'" size="small">{{ statusLabel(row.status) }}</el-tag>
         </div>
@@ -21,10 +23,7 @@
           <div class="mobile-record-field"><div class="mobile-record-label">周期</div><div class="mobile-record-value">{{ cadence(row) }}</div></div>
           <div class="mobile-record-field"><div class="mobile-record-label">下次执行</div><div class="mobile-record-value">{{ row.next_due_date }}</div></div>
         </div>
-        <div class="mobile-record-actions">
-          <el-button link type="primary" @click="showHistory(row)">执行记录</el-button>
-          <template v-if="row.status !== 'DELETED'"><el-button link type="primary" @click="openEdit(row)">编辑</el-button><el-button link @click="toggleStatus(row)">{{ row.status === 'ACTIVE' ? '暂停' : '恢复' }}</el-button><el-button link type="danger" @click="remove(row)">删除</el-button></template>
-        </div>
+        <div v-if="actionCardId === `plan-${row.id}` && !multiSelectMode" class="mobile-record-actions-panel" @click.stop="closeActions"><el-button class="mobile-action-button" type="primary" @click="showHistory(row)">执行记录</el-button><template v-if="row.status !== 'DELETED'"><el-button class="mobile-action-button" type="primary" @click="openEdit(row)">编辑</el-button><el-button class="mobile-action-button" @click="toggleStatus(row)">{{ row.status === 'ACTIVE' ? '暂停' : '恢复' }}</el-button><el-button class="mobile-action-button" type="danger" @click="remove(row)">删除</el-button></template></div>
       </el-card>
     </div>
     <el-card shadow="never" class="desktop-records">
@@ -87,10 +86,12 @@
     <el-dialog v-model="historyVisible" :title="`${historyPlan ? assetName(historyPlan.target_asset_id) : ''} · 执行记录`" width="760px">
       <div class="mobile-records">
         <el-empty v-if="!historyLoading && executions.length === 0" description="暂无执行记录" />
-        <el-card v-for="row in executions" :key="row.id" shadow="never" class="mobile-record-card">
-          <div class="mobile-record-heading"><div class="mobile-record-title">{{ row.scheduled_date }}<div class="mobile-record-meta">{{ assetName(row.source_asset_id) }}</div></div><el-tag :type="executionTag(row.status)" size="small">{{ executionLabel(row.status) }}</el-tag></div>
+        <div v-if="executions.some((item) => item.status === 'FAILED') && historyPlan?.status !== 'DELETED'" class="mobile-actions-hint">轻点失败记录显示重试操作。</div>
+        <el-card v-for="row in executions" :key="row.id" shadow="never" class="mobile-record-card" :class="{ 'is-pressed': pressedCardId === `execution-${row.id}` }" @pointerdown="onPointerDown(`execution-${row.id}`, $event)" @pointermove="onPointerMove" @pointerup="onPointerEnd" @pointercancel="onPointerEnd" @click="onCardClick(`execution-${row.id}`)" @contextmenu="onContextMenu">
+          <div class="mobile-record-heading"><div class="mobile-record-title">{{ row.scheduled_date }}<div class="mobile-record-meta">{{ assetName(row.source_asset_id) }}</div></div><el-tag :type="executionTag(row.status)" size="small">{{ executionLabel(row.status) }}</el-tag>
+          </div>
           <div class="mobile-record-fields"><div class="mobile-record-field"><div class="mobile-record-label">金额</div><div>{{ formatMoney(row.amount) }}</div></div><div class="mobile-record-field"><div class="mobile-record-label">说明</div><div class="mobile-record-value">{{ row.failure_reason || '—' }}</div></div></div>
-          <div v-if="row.status === 'FAILED' && historyPlan?.status !== 'DELETED'" class="mobile-record-actions"><el-button link type="primary" @click="retry(row.id)">重试</el-button></div>
+          <div v-if="actionCardId === `execution-${row.id}` && row.status === 'FAILED' && historyPlan?.status !== 'DELETED'" class="mobile-record-actions-panel" @click.stop="closeActions"><el-button class="mobile-action-button" type="primary" @click="retry(row.id)">重试</el-button></div>
         </el-card>
       </div>
       <el-table class="desktop-records" :data="executions" v-loading="historyLoading" max-height="480">
@@ -111,6 +112,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Refresh } from '@element-plus/icons-vue'
+import { useMobileCardInteractions } from '@/composables/useMobileCardInteractions'
 import { createInvestmentPlan, deleteInvestmentPlan, executeInvestmentPlan, listInvestmentExecutions, listInvestmentPlans, retryInvestmentExecution, setInvestmentPlanStatus, updateInvestmentPlan } from '@/api'
 import { useAppStore } from '@/stores/app'
 import { formatMoney, toMinor } from '@/utils/money'
@@ -120,11 +122,7 @@ const store = useAppStore()
 const route = useRoute()
 const plans = ref<RecurringInvestmentPlan[]>([])
 const selectedPlans = ref<RecurringInvestmentPlan[]>([])
-function togglePlanSelection(plan: RecurringInvestmentPlan, checked: string | number | boolean) {
-  const selected = selectedPlans.value.some((item) => item.id === plan.id)
-  if (checked && !selected) selectedPlans.value = [...selectedPlans.value, plan]
-  if (!checked && selected) selectedPlans.value = selectedPlans.value.filter((item) => item.id !== plan.id)
-}
+const { actionCardId, pressedCardId, multiSelectMode, selectedIds, onPointerDown, onPointerMove, onPointerEnd, onCardClick, onContextMenu, toggleSelection, cancelSelection, closeActions } = useMobileCardInteractions(selectedPlans)
 const executions = ref<RecurringInvestmentExecution[]>([])
 const loading = ref(false)
 const saving = ref(false)

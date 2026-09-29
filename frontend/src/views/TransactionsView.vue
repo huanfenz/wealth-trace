@@ -8,7 +8,7 @@
       <el-button :icon="Edit" @click="openDialog('adjustment')">余额调整</el-button>
     </div>
 
-    <div class="toolbar">
+    <div class="toolbar" :class="{ 'is-multi-selecting': multiSelectMode }">
       <el-select v-model="filterMember" clearable placeholder="按成员" style="width: 150px" @change="reload">
         <el-option v-for="m in store.members" :key="m.id" :label="m.name" :value="m.id" />
       </el-select>
@@ -32,15 +32,17 @@
         />
       </el-select>
       <div class="spacer" />
-      <el-button type="danger" :disabled="selectedTransactions.length === 0" @click="bulkRemove">批量删除</el-button>
+      <el-button class="mobile-batch-action" type="danger" :disabled="selectedTransactions.length === 0" @click="bulkRemove">批量删除</el-button>
       <span v-if="selectedTransactions.length" class="selection-count">已选 {{ selectedTransactions.length }} 项</span>
+      <el-button v-if="multiSelectMode" class="mobile-multi-cancel" @click="cancelSelection">取消多选</el-button>
     </div>
 
     <div class="mobile-records">
       <el-empty v-if="!loading && transactions.length === 0" description="暂无交易记录" />
-      <el-card v-for="row in transactions" :key="row.id" shadow="never" class="mobile-record-card">
+      <div v-if="transactions.length" class="mobile-actions-hint">轻点显示操作；长按开始多选，再点卡片勾选；点“取消多选”退出。</div>
+      <el-card v-for="row in transactions" :key="row.id" shadow="never" class="mobile-record-card" :class="{ 'is-pressed': pressedCardId === row.id, 'is-selected': multiSelectMode && selectedIds.has(row.id) }" @pointerdown="onPointerDown(row.id, $event, row)" @pointermove="onPointerMove" @pointerup="onPointerEnd" @pointercancel="onPointerEnd" @click="onCardClick(row.id, row)" @contextmenu="onContextMenu">
         <div class="mobile-record-heading">
-          <el-checkbox :model-value="selectedTransactions.some((item) => item.id === row.id)" aria-label="选择交易记录" @change="toggleTransactionSelection(row, $event)" />
+          <el-checkbox v-if="multiSelectMode" :model-value="selectedIds.has(row.id)" :aria-label="`选择${row.title}`" @click.stop @change="toggleSelection(row)" />
           <div class="mobile-record-title">{{ row.title }}<div class="mobile-record-meta">{{ row.transaction_time }} · {{ store.memberName(row.owner_member_id) }}</div></div>
           <el-tag size="small" :type="tagType(row.type)">{{ typeLabel(row) }}</el-tag>
         </div>
@@ -49,7 +51,7 @@
           <div class="mobile-record-field"><div class="mobile-record-label">金额</div><span class="amount" :class="row.direction === 'OUT' ? 'negative' : row.direction === 'IN' ? 'positive' : ''">{{ amountText(row) }}</span></div>
           <div class="mobile-record-field" style="grid-column: 1 / -1"><div class="mobile-record-label">备注</div><div class="mobile-record-value">{{ row.remark?.trim() || '—' }}</div></div>
         </div>
-        <div class="mobile-record-actions"><el-button link type="primary" @click="openEditor(row)">编辑</el-button><el-button link type="danger" @click="remove(row)">删除</el-button></div>
+        <div v-if="actionCardId === row.id && !multiSelectMode" class="mobile-record-actions-panel" @click.stop="closeActions"><el-button class="mobile-action-button" type="primary" @click="openEditor(row)">编辑</el-button><el-button class="mobile-action-button" type="danger" @click="remove(row)">删除</el-button></div>
       </el-card>
     </div>
 
@@ -239,6 +241,7 @@ import {
   updateTransaction,
 } from '@/api'
 import { useAppStore } from '@/stores/app'
+import { useMobileCardInteractions } from '@/composables/useMobileCardInteractions'
 import { transactionTypeLabels } from '@/utils/labels'
 import { formatMoney, toMinor, toYuanInput } from '@/utils/money'
 import type { Transaction, TransactionEntry, TransactionType } from '@/types'
@@ -249,11 +252,7 @@ type DeleteMode = 'records' | 'rollback'
 const store = useAppStore()
 const transactions = ref<Transaction[]>([]) // 当前页流水
 const selectedTransactions = ref<Transaction[]>([])
-function toggleTransactionSelection(transaction: Transaction, checked: string | number | boolean) {
-  const selected = selectedTransactions.value.some((item) => item.id === transaction.id)
-  if (checked && !selected) selectedTransactions.value = [...selectedTransactions.value, transaction]
-  if (!checked && selected) selectedTransactions.value = selectedTransactions.value.filter((item) => item.id !== transaction.id)
-}
+const { actionCardId, pressedCardId, multiSelectMode, selectedIds, onPointerDown, onPointerMove, onPointerEnd, onCardClick, onContextMenu, toggleSelection, cancelSelection, closeActions } = useMobileCardInteractions(selectedTransactions)
 const loading = ref(false)                  // 列表加载中
 const saving = ref(false)                   // 表单提交中
 const total = ref(0)                        // 总条数

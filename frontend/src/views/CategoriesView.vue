@@ -1,5 +1,11 @@
 <template>
   <div class="page-stack">
+    <div v-if="multiSelectMode" class="toolbar mobile-only mobile-category-bulk">
+      <span class="selection-count">已选 {{ selectedCategories.length }} 项</span>
+      <el-button :disabled="saving" @click="setSelectedActive(true)">批量启用</el-button>
+      <el-button :disabled="saving" @click="setSelectedActive(false)">批量停用</el-button>
+      <el-button @click="cancelSelection">取消多选</el-button>
+    </div>
     <el-card v-for="group in groups" :key="group.type">
       <template #header>
         <div class="card-header">
@@ -9,10 +15,14 @@
       </template>
       <div class="mobile-records">
         <el-empty v-if="!loading && categories.filter((item) => item.type === group.type).length === 0" description="暂无分类" />
-        <el-card v-for="row in categories.filter((item) => item.type === group.type)" :key="row.id" shadow="never" class="mobile-record-card">
-          <div class="mobile-record-heading"><div class="mobile-record-title">{{ row.name }}</div><el-tag :type="row.active ? 'success' : 'info'" size="small">{{ row.active ? '启用' : '停用' }}</el-tag></div>
+        <div v-if="categories.some((item) => item.type === group.type)" class="mobile-actions-hint">轻点显示操作；长按开始多选，再点卡片勾选；点“取消多选”退出。</div>
+        <el-card v-for="row in categories.filter((item) => item.type === group.type)" :key="row.id" shadow="never" class="mobile-record-card" :class="{ 'is-pressed': pressedCardId === row.id, 'is-selected': multiSelectMode && selectedIds.has(row.id) }" @pointerdown="onPointerDown(row.id, $event, row)" @pointermove="onPointerMove" @pointerup="onPointerEnd" @pointercancel="onPointerEnd" @click="onCardClick(row.id, row)" @contextmenu="onContextMenu">
+          <div class="mobile-record-heading">
+            <el-checkbox v-if="multiSelectMode" :model-value="selectedIds.has(row.id)" :aria-label="`选择${row.name}`" @click.stop @change="toggleSelection(row)" />
+            <div class="mobile-record-title">{{ row.name }}</div><el-tag :type="row.active ? 'success' : 'info'" size="small">{{ row.active ? '启用' : '停用' }}</el-tag>
+          </div>
           <div class="mobile-record-fields"><div class="mobile-record-field"><div class="mobile-record-label">排序</div><div>{{ row.sort_order }}</div></div></div>
-          <div class="mobile-record-actions"><el-button link type="primary" @click="openEdit(row)">编辑</el-button><el-button link :type="row.active ? 'danger' : 'success'" @click="toggle(row)">{{ row.active ? '停用' : '启用' }}</el-button><el-button link type="danger" @click="remove(row)">删除</el-button></div>
+          <div v-if="actionCardId === row.id && !multiSelectMode" class="mobile-record-actions-panel" @click.stop="closeActions"><el-button class="mobile-action-button" type="primary" @click="openEdit(row)">编辑</el-button><el-button class="mobile-action-button" :type="row.active ? 'danger' : 'success'" @click="toggle(row)">{{ row.active ? '停用' : '启用' }}</el-button><el-button class="mobile-action-button" type="danger" @click="remove(row)">删除</el-button></div>
         </el-card>
       </div>
       <el-table class="desktop-records" :data="categories.filter((item) => item.type === group.type)" v-loading="loading">
@@ -53,6 +63,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
+import { useMobileCardInteractions } from '@/composables/useMobileCardInteractions'
 import * as api from '@/api'
 import { useAppStore } from '@/stores/app'
 import type { TransactionCategory } from '@/types'
@@ -60,6 +71,8 @@ import type { TransactionCategory } from '@/types'
 const store = useAppStore()
 const groups = [{ type: 'INCOME' as const, label: '收入分类' }, { type: 'EXPENSE' as const, label: '支出分类' }]
 const categories = ref<TransactionCategory[]>([])
+const selectedCategories = ref<TransactionCategory[]>([])
+const { actionCardId, pressedCardId, multiSelectMode, selectedIds, onPointerDown, onPointerMove, onPointerEnd, onCardClick, onContextMenu, toggleSelection, cancelSelection, closeActions } = useMobileCardInteractions(selectedCategories)
 const loading = ref(false)
 const saving = ref(false)
 const dialogVisible = ref(false)
@@ -104,6 +117,23 @@ async function toggle(item: TransactionCategory) {
     await api.setCategoryActive(store.householdId, item.id, !item.active)
     await Promise.all([load(), store.refreshCategories()])
   } catch (error) { ElMessage.error((error as Error).message) }
+}
+
+async function setSelectedActive(active: boolean) {
+  const targets = selectedCategories.value.filter((item) => item.active !== active)
+  if (!targets.length) { ElMessage.info(active ? '所选分类均已启用' : '所选分类均已停用'); return }
+  saving.value = true
+  try {
+    const results = await Promise.allSettled(targets.map((item) => api.setCategoryActive(store.householdId, item.id, active)))
+    await Promise.all([load(), store.refreshCategories()])
+    selectedCategories.value = []
+    const failed = results.filter((result) => result.status === 'rejected').length
+    ElMessage[failed ? 'warning' : 'success'](`批量${active ? '启用' : '停用'}完成：成功 ${targets.length - failed} 项，失败 ${failed} 项`)
+  } catch (error) {
+    ElMessage.error((error as Error).message)
+  } finally {
+    saving.value = false
+  }
 }
 async function remove(item: TransactionCategory) {
   try {

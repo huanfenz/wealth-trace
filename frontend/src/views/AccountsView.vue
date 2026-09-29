@@ -1,11 +1,12 @@
 <!-- 账户管理页：按成员筛选账户列表，并通过弹窗新增/编辑账户（属主、类型、机构等）。 -->
 <template>
   <div>
-    <div class="toolbar">
+    <div class="toolbar" :class="{ 'is-multi-selecting': multiSelectMode }">
       <el-button type="primary" :icon="Plus" @click="openCreate">新增账户</el-button>
-      <el-button :disabled="selectedAccounts.length === 0" @click="bulkDisable">批量停用</el-button>
-      <el-button type="danger" :disabled="selectedAccounts.length === 0" @click="bulkRemove">批量删除</el-button>
+      <el-button class="mobile-batch-action" :disabled="selectedAccounts.length === 0" @click="bulkDisable">批量停用</el-button>
+      <el-button class="mobile-batch-action" type="danger" :disabled="selectedAccounts.length === 0" @click="bulkRemove">批量删除</el-button>
       <span v-if="selectedAccounts.length" class="selection-count">已选 {{ selectedAccounts.length }} 项</span>
+      <el-button v-if="multiSelectMode" class="mobile-multi-cancel" @click="cancelSelection">取消多选</el-button>
       <el-select v-model="filterMember" clearable placeholder="按成员筛选" style="width: 180px" @change="load">
         <el-option v-for="m in store.members" :key="m.id" :label="m.name" :value="m.id" />
       </el-select>
@@ -14,9 +15,10 @@
 
     <div class="mobile-records">
       <el-empty v-if="!loading && accounts.length === 0" description="暂无账户" />
-      <el-card v-for="row in accounts" :key="row.id" shadow="never" class="mobile-record-card">
+      <div v-if="accounts.length" class="mobile-actions-hint">轻点显示操作；长按开始多选，再点卡片勾选；点“取消多选”退出。</div>
+      <el-card v-for="row in accounts" :key="row.id" shadow="never" class="mobile-record-card" :class="{ 'is-pressed': pressedCardId === row.id, 'is-selected': multiSelectMode && selectedIds.has(row.id) }" @pointerdown="onPointerDown(row.id, $event, row)" @pointermove="onPointerMove" @pointerup="onPointerEnd" @pointercancel="onPointerEnd" @click="onCardClick(row.id, row)" @contextmenu="onContextMenu">
         <div class="mobile-record-heading">
-          <el-checkbox :model-value="selectedAccounts.some((item) => item.id === row.id)" aria-label="选择账户" @change="toggleAccountSelection(row, $event)" />
+          <el-checkbox v-if="multiSelectMode" :model-value="selectedIds.has(row.id)" :aria-label="`选择${row.name}`" @click.stop @change="toggleSelection(row)" />
           <div class="mobile-record-title">{{ row.name }}</div>
           <el-tag :type="row.enabled ? 'success' : 'info'" size="small">{{ row.enabled ? '启用' : '停用' }}</el-tag>
         </div>
@@ -27,7 +29,7 @@
           <div class="mobile-record-field"><div class="mobile-record-label">资产数</div><div class="mobile-record-value">{{ row.asset_count }}</div></div>
           <div class="mobile-record-field"><div class="mobile-record-label">余额</div><div class="mobile-record-value"><AmountText :value="row.balance" /></div></div>
         </div>
-        <div class="mobile-record-actions"><el-button link type="primary" @click="openEdit(row)">编辑</el-button><el-button link type="danger" @click="remove(row)">删除</el-button></div>
+        <div v-if="actionCardId === row.id && !multiSelectMode" class="mobile-record-actions-panel" @click="closeActions"><el-button class="mobile-action-button" type="primary" @click="openEdit(row)">编辑</el-button><el-button class="mobile-action-button" type="danger" @click="remove(row)">删除</el-button></div>
       </el-card>
     </div>
 
@@ -110,6 +112,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
+import { useMobileCardInteractions } from '@/composables/useMobileCardInteractions'
 
 import AmountText from '@/components/AmountText.vue'
 import { createAccount, deleteAccount, listAccounts, updateAccount } from '@/api'
@@ -120,11 +123,7 @@ import type { Account, AccountType } from '@/types'
 const store = useAppStore()
 const accounts = ref<Account[]>([])       // 当前筛选条件下的账户列表
 const selectedAccounts = ref<Account[]>([])
-function toggleAccountSelection(account: Account, checked: string | number | boolean) {
-  const selected = selectedAccounts.value.some((item) => item.id === account.id)
-  if (checked && !selected) selectedAccounts.value = [...selectedAccounts.value, account]
-  if (!checked && selected) selectedAccounts.value = selectedAccounts.value.filter((item) => item.id !== account.id)
-}
+const { actionCardId, pressedCardId, multiSelectMode, selectedIds, onPointerDown, onPointerMove, onPointerEnd, onCardClick, onContextMenu, toggleSelection, cancelSelection, closeActions } = useMobileCardInteractions(selectedAccounts)
 const loading = ref(false)                // 列表加载中
 const saving = ref(false)                 // 表单提交中
 const dialogVisible = ref(false)          // 弹窗显隐

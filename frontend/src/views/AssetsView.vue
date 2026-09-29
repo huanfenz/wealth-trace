@@ -1,12 +1,13 @@
 <!-- 资产管理页：按成员/账户筛选资产，弹窗根据资产类型动态渲染对应明细块（定期/股票基金/债券/保险）。 -->
 <template>
   <div>
-    <div class="toolbar">
+    <div class="toolbar" :class="{ 'is-multi-selecting': multiSelectMode }">
       <el-button type="primary" :icon="Plus" @click="openCreate">新增资产</el-button>
       <el-button :icon="Refresh" :loading="maintaining" @click="runMaintenance">手动维护</el-button>
-      <el-button :disabled="selectedAssets.length === 0" @click="bulkClose">批量关闭</el-button>
-      <el-button type="danger" :disabled="selectedAssets.length === 0" @click="bulkRemove">批量删除</el-button>
+      <el-button class="mobile-batch-action" :disabled="selectedAssets.length === 0" @click="bulkClose">批量关闭</el-button>
+      <el-button class="mobile-batch-action" type="danger" :disabled="selectedAssets.length === 0" @click="bulkRemove">批量删除</el-button>
       <span v-if="selectedAssets.length" class="selection-count">已选 {{ selectedAssets.length }} 项</span>
+      <el-button v-if="multiSelectMode" class="mobile-multi-cancel" @click="cancelSelection">取消多选</el-button>
       <el-select v-model="filterMember" clearable placeholder="按成员" style="width: 150px" @change="load">
         <el-option v-for="m in store.members" :key="m.id" :label="m.name" :value="m.id" />
       </el-select>
@@ -18,9 +19,10 @@
 
     <div class="mobile-records">
       <el-empty v-if="!loading && assets.length === 0" description="暂无资产" />
-      <el-card v-for="row in assets" :key="row.id" shadow="never" class="mobile-record-card">
+      <div v-if="assets.length" class="mobile-actions-hint">轻点显示操作；长按开始多选，再点卡片勾选；点“取消多选”退出。</div>
+      <el-card v-for="row in assets" :key="row.id" shadow="never" class="mobile-record-card" :class="{ 'is-pressed': pressedCardId === row.id, 'is-selected': multiSelectMode && selectedIds.has(row.id) }" @pointerdown="onPointerDown(row.id, $event, row)" @pointermove="onPointerMove" @pointerup="onPointerEnd" @pointercancel="onPointerEnd" @click="onCardClick(row.id, row)" @contextmenu="onContextMenu">
         <div class="mobile-record-heading">
-          <el-checkbox :model-value="selectedAssets.some((item) => item.id === row.id)" aria-label="选择资产" @change="toggleAssetSelection(row, $event)" />
+          <el-checkbox v-if="multiSelectMode" :model-value="selectedIds.has(row.id)" :aria-label="`选择${row.name}`" @click.stop @change="toggleSelection(row)" />
           <div class="mobile-record-title">{{ row.name }}<div class="mobile-record-meta">{{ store.memberName(row.owner_member_id) }} · {{ store.accountName(row.account_id) }}</div></div>
           <el-tag :type="row.status === 'ACTIVE' ? 'success' : 'info'" size="small">{{ assetStatusLabels[row.status as AssetStatus] }}</el-tag>
         </div>
@@ -34,12 +36,12 @@
             <span v-else-if="row.asset_type === 'TERM_DEPOSIT'">{{ termDepositInfo(row) }}</span><span v-else>—</span>
           </div></div>
         </div>
-        <div class="mobile-record-actions">
-          <el-button link type="primary" @click="openEdit(row)">编辑</el-button>
-          <el-button link type="primary" @click="openAppend(row)">追加</el-button>
-          <el-button v-if="row.asset_type === 'STOCK_FUND' && row.status === 'ACTIVE'" link type="primary" @click="openInvestment(row)">定投</el-button>
-          <el-button link :type="row.status === 'ACTIVE' ? 'warning' : 'success'" @click="toggleStatus(row)">{{ row.status === 'ACTIVE' ? '关闭' : '启用' }}</el-button>
-          <el-button link type="danger" @click="remove(row)">删除</el-button>
+        <div v-if="actionCardId === row.id && !multiSelectMode" class="mobile-record-actions-panel" @click.stop="closeActions">
+          <el-button class="mobile-action-button" type="primary" @click="openEdit(row)">编辑</el-button>
+          <el-button class="mobile-action-button" type="primary" @click="openAppend(row)">追加</el-button>
+          <el-button v-if="row.asset_type === 'STOCK_FUND' && row.status === 'ACTIVE'" class="mobile-action-button" type="primary" @click="openInvestment(row)">定投</el-button>
+          <el-button class="mobile-action-button" :type="row.status === 'ACTIVE' ? 'warning' : 'success'" @click="toggleStatus(row)">{{ row.status === 'ACTIVE' ? '关闭' : '启用' }}</el-button>
+          <el-button class="mobile-action-button" type="danger" @click="remove(row)">删除</el-button>
         </div>
       </el-card>
     </div>
@@ -340,6 +342,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Refresh } from '@element-plus/icons-vue'
 
 import AmountText from '@/components/AmountText.vue'
+import { useMobileCardInteractions } from '@/composables/useMobileCardInteractions'
 import {
   createAsset,
   deleteAsset,
@@ -367,11 +370,7 @@ function openInvestment(asset: Asset) {
 }
 const assets = ref<Asset[]>([])       // 当前筛选条件下的资产列表
 const selectedAssets = ref<Asset[]>([])
-function toggleAssetSelection(asset: Asset, checked: string | number | boolean) {
-  const selected = selectedAssets.value.some((item) => item.id === asset.id)
-  if (checked && !selected) selectedAssets.value = [...selectedAssets.value, asset]
-  if (!checked && selected) selectedAssets.value = selectedAssets.value.filter((item) => item.id !== asset.id)
-}
+const { actionCardId, pressedCardId, multiSelectMode, selectedIds, onPointerDown, onPointerMove, onPointerEnd, onCardClick, onContextMenu, toggleSelection, cancelSelection, closeActions } = useMobileCardInteractions(selectedAssets)
 const loading = ref(false)            // 列表加载中
 const saving = ref(false)             // 表单提交中
 const maintaining = ref(false)        // 手动维护请求中

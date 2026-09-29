@@ -1,25 +1,27 @@
 <!-- 成员管理页：列出家庭成员，可通过弹窗新增或编辑（姓名、角色、状态）。 -->
 <template>
   <div>
-    <div class="toolbar">
+    <div class="toolbar" :class="{ 'is-multi-selecting': multiSelectMode }">
       <el-button type="primary" :icon="Plus" @click="openCreate">新增成员</el-button>
-      <el-button :disabled="selectedMembers.length === 0" @click="bulkPause">批量停用</el-button>
+      <el-button class="mobile-batch-action" :disabled="selectedMembers.length === 0" @click="bulkPause">批量停用</el-button>
       <span v-if="selectedMembers.length" class="selection-count">已选 {{ selectedMembers.length }} 项</span>
+      <el-button v-if="multiSelectMode" class="mobile-multi-cancel" @click="cancelSelection">取消多选</el-button>
       <div class="spacer" />
     </div>
 
     <div class="mobile-records">
       <el-empty v-if="!loading && store.members.length === 0" description="暂无成员" />
-      <el-card v-for="row in store.members" :key="row.id" shadow="never" class="mobile-record-card">
+      <div v-if="store.members.length" class="mobile-actions-hint">轻点显示操作；长按开始多选，再点卡片勾选；点“取消多选”退出。</div>
+      <el-card v-for="row in store.members" :key="row.id" shadow="never" class="mobile-record-card" :class="{ 'is-pressed': pressedCardId === row.id, 'is-selected': multiSelectMode && selectedIds.has(row.id) }" @pointerdown="onPointerDown(row.id, $event, row)" @pointermove="onPointerMove" @pointerup="onPointerEnd" @pointercancel="onPointerEnd" @click="onCardClick(row.id, row)" @contextmenu="onContextMenu">
         <div class="mobile-record-heading">
-          <el-checkbox :model-value="selectedMembers.some((item) => item.id === row.id)" aria-label="选择成员" @change="toggleMemberSelection(row, $event)" />
+          <el-checkbox v-if="multiSelectMode" :model-value="selectedIds.has(row.id)" :aria-label="`选择${row.name}`" @click.stop @change="toggleSelection(row)" />
           <div class="mobile-record-title">{{ row.name }}</div>
         </div>
         <div class="mobile-record-fields">
           <div class="mobile-record-field"><div class="mobile-record-label">角色</div><el-tag :type="row.role === 'OWNER' ? 'success' : 'info'" size="small">{{ memberRoleLabels[row.role as MemberRole] }}</el-tag></div>
           <div class="mobile-record-field"><div class="mobile-record-label">状态</div><el-tag :type="row.status === 'ACTIVE' ? 'success' : 'info'" size="small">{{ memberStatusLabels[row.status as MemberStatus] }}</el-tag></div>
         </div>
-        <div class="mobile-record-actions"><el-button link type="primary" @click="openEdit(row)">编辑</el-button></div>
+        <div v-if="actionCardId === row.id && !multiSelectMode" class="mobile-record-actions-panel" @click="closeActions"><el-button class="mobile-action-button" type="primary" @click="openEdit(row)">编辑</el-button></div>
       </el-card>
     </div>
 
@@ -80,6 +82,7 @@
 import { reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
+import { useMobileCardInteractions } from '@/composables/useMobileCardInteractions'
 
 import { createMember, updateMember } from '@/api'
 import { useAppStore } from '@/stores/app'
@@ -89,6 +92,7 @@ import type { Member, MemberRole, MemberStatus } from '@/types'
 const store = useAppStore()
 const loading = ref(false)        // 列表加载中
 const selectedMembers = ref<Member[]>([])
+const { actionCardId, pressedCardId, multiSelectMode, selectedIds, onPointerDown, onPointerMove, onPointerEnd, onCardClick, onContextMenu, toggleSelection, cancelSelection, closeActions } = useMobileCardInteractions(selectedMembers)
 const saving = ref(false)         // 表单提交中
 const dialogVisible = ref(false)  // 弹窗显隐
 const editing = ref<Member | null>(null) // 当前编辑对象，null 表示新增
@@ -99,12 +103,6 @@ const form = reactive({
   role: 'MEMBER' as MemberRole,
   status: 'ACTIVE' as MemberStatus,
 })
-
-function toggleMemberSelection(member: Member, checked: string | number | boolean) {
-  const selected = selectedMembers.value.some((item) => item.id === member.id)
-  if (checked && !selected) selectedMembers.value = [...selectedMembers.value, member]
-  if (!checked && selected) selectedMembers.value = selectedMembers.value.filter((item) => item.id !== member.id)
-}
 
 // 打开「新增」弹窗并重置表单为默认值。
 function openCreate() {

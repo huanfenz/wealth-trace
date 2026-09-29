@@ -55,16 +55,24 @@ body {
 }
 
 .mobile-records { display: none; }
-.mobile-record-card { margin-bottom: 10px; border-radius: 10px; }
+.mobile-record-card { margin-bottom: 10px; border-radius: 10px; cursor: pointer; -webkit-tap-highlight-color: transparent; transition: background-color 100ms ease-out, border-color 100ms ease-out; }
+.mobile-record-card.is-pressed,
+.mobile-record-card.is-pressed .el-card__body { background-color: #f1f2f4; }
+.mobile-record-card.is-selected { border-color: var(--wt-brand); box-shadow: 0 0 0 1px var(--wt-brand), 0 3px 10px rgb(47 111 237 / 12%); }
+.mobile-record-card.is-selected .el-card__body { background: #f5f8ff; }
 .mobile-record-card .el-card__body { padding: 14px; }
 .mobile-record-heading { display: flex; align-items: flex-start; gap: 10px; }
 .mobile-record-title { flex: 1; min-width: 0; font-size: 15px; font-weight: 600; overflow-wrap: anywhere; }
 .mobile-record-meta { color: #909399; font-size: 12px; margin-top: 4px; }
+.mobile-actions-hint { margin: 0 2px 8px; color: #909399; font-size: 12px; }
 .mobile-record-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 14px; margin-top: 12px; }
 .mobile-record-field { min-width: 0; }
 .mobile-record-label { color: #909399; font-size: 12px; margin-bottom: 3px; }
 .mobile-record-value { overflow-wrap: anywhere; }
 .mobile-record-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 12px; margin-top: 10px; padding-top: 8px; border-top: 1px solid #ebeef5; }
+.mobile-record-actions-panel { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 12px; padding: 10px; border: 1px solid #e4e7ed; border-radius: 10px; background: #f7f8fa; }
+.mobile-action-button { width: 100%; min-height: 44px; justify-content: center; margin: 0 !important; padding: 10px 12px; border-radius: 8px; font-weight: 600; }
+.mobile-only { display: none; }
 
 @media (max-width: 767px) {
   html, body, #app { min-height: 100%; height: auto; }
@@ -74,6 +82,13 @@ body {
   .toolbar > .spacer { display: none; }
   .toolbar > .el-select, .toolbar > .el-date-editor { flex: 1 1 145px; width: auto !important; min-width: 0; }
   .toolbar > .el-button { margin-left: 0; }
+  .toolbar:not(.is-multi-selecting) .mobile-batch-action,
+  .toolbar:not(.is-multi-selecting) .selection-count { display: none !important; }
+  .toolbar .mobile-multi-cancel { display: inline-flex; }
+  .toolbar:not(.is-multi-selecting) .mobile-multi-cancel { display: none; }
+  .mobile-only { display: flex; }
+  .mobile-category-bulk { align-items: center; }
+  .mobile-record-card { touch-action: pan-y; }
   .el-row { row-gap: 10px; }
   .el-card { min-width: 0; }
   .el-dialog { width: calc(100vw - 24px) !important; max-width: 640px; margin: 12px auto !important; }
