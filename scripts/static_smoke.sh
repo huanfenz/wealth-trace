@@ -1,10 +1,24 @@
 #!/usr/bin/env bash
 # Verifies that the backend serves the built SPA and that API routes win.
+# 后端运行在临时目录的独立配置与数据库上,绝不触碰 data/ 下的真实数据。
 set -u
 cd "$(dirname "$0")/.."
 
-rm -f data/caiji.db data/caiji.db-wal data/caiji.db-shm
-./build/backend/wealth-trace config.json >/tmp/wt-static.log 2>&1 &
+SMOKE_ROOT="$(mktemp -d /tmp/wt-static-smoke.XXXXXX)"
+trap 'rm -rf "$SMOKE_ROOT"' EXIT
+
+python3 - "$SMOKE_ROOT" <<'PY'
+import json, sys
+from pathlib import Path
+
+root = Path(sys.argv[1])
+config = json.loads(Path('config.json').read_text())
+config['database']['path'] = str(root / 'smoke.db')
+config['server']['host'] = '127.0.0.1'
+(root / 'config.json').write_text(json.dumps(config))
+PY
+
+./build/backend/wealth-trace "$SMOKE_ROOT/config.json" >/tmp/wt-static.log 2>&1 &
 PID=$!
 sleep 1.2
 
