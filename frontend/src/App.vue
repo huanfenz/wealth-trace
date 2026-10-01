@@ -60,7 +60,16 @@
           <div class="household">{{ householdName }}</div>
           <el-button
             v-if="loggedIn"
-            class="logout-button"
+            class="header-action-button"
+            text
+            aria-label="修改密码"
+            @click="passwordDialogVisible = true"
+          >
+            <el-icon><Key /></el-icon>
+          </el-button>
+          <el-button
+            v-if="loggedIn"
+            class="header-action-button logout-username-button"
             text
             :loading="loggingOut"
             aria-label="登出"
@@ -100,15 +109,18 @@
       <el-menu-item index="/data-backup"><el-icon><FolderOpened /></el-icon><span>数据备份</span></el-menu-item>
     </el-menu>
   </el-drawer>
+
+  <ChangePasswordDialog v-model="passwordDialogVisible" />
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Menu } from '@element-plus/icons-vue'
 
 import { getSessionUsername, hasSession, logout } from '@/api/auth'
+import ChangePasswordDialog from '@/components/ChangePasswordDialog.vue'
 import { useAppStore } from '@/stores/app'
 
 const store = useAppStore()
@@ -124,11 +136,13 @@ const isPublicPage = computed(() => route.meta.public === true)
 const loggedIn = computed(() => hasSession())
 const sessionUsername = computed(() => getSessionUsername())
 const loggingOut = ref(false)
+const passwordDialogVisible = ref(false)
 
 // 首次挂载时初始化全局数据（元数据、家庭、成员等），失败给出提示与重试入口。
 const initErrorMessage = ref('')
 
 async function initializeApp() {
+  initErrorMessage.value = ''
   try {
     await store.initialize()
   } catch (error) {
@@ -138,11 +152,22 @@ async function initializeApp() {
 }
 
 function retryInitialize() {
-  initErrorMessage.value = ''
   void initializeApp()
 }
 
-onMounted(initializeApp)
+// 登录页等公共页上不发起受保护请求（未登录必然 401，只会白白置起 initError）；
+// 从公共页切回业务页（登录/建号成功跳转）且尚未就绪时，自动初始化。
+onMounted(() => {
+  if (!isPublicPage.value) {
+    void initializeApp()
+  }
+})
+
+watch(isPublicPage, (nowPublic, wasPublic) => {
+  if (wasPublic && !nowPublic && !store.ready) {
+    void initializeApp()
+  }
+})
 
 async function handleLogout() {
   if (loggingOut.value) return
@@ -200,7 +225,7 @@ async function handleLogout() {
 
 .header-leading { display: flex; align-items: center; min-width: 0; gap: 8px; }
 .header-trailing { display: flex; align-items: center; gap: 10px; min-width: 0; }
-.logout-button { color: #909399; padding: 4px 8px; }
+.header-action-button { color: #909399; padding: 4px 8px; }
 .logout-username { font-size: 13px; }
 .mobile-menu-button { display: none; flex: none; font-size: 20px; }
 

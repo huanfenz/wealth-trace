@@ -52,45 +52,17 @@
         <el-button class="submit" type="primary" native-type="submit" :loading="submitting">
           {{ needsSetup ? '创建账号并登录' : '登录' }}
         </el-button>
-
-        <div v-if="!needsSetup" class="aux-actions">
-          <el-button link type="primary" @click="passwordDialogVisible = true">修改密码</el-button>
-        </div>
       </el-form>
     </el-card>
-
-    <el-dialog v-model="passwordDialogVisible" title="修改密码" width="min(92vw, 380px)">
-      <el-form label-position="top" @submit.prevent="submitChangePassword">
-        <el-form-item label="旧密码">
-          <el-input v-model="changeForm.oldPassword" type="password" show-password autocomplete="current-password" />
-        </el-form-item>
-        <el-form-item label="新密码（至少 8 位）">
-          <el-input v-model="changeForm.newPassword" type="password" show-password autocomplete="new-password" />
-        </el-form-item>
-        <el-form-item label="确认新密码">
-          <el-input v-model="changeForm.confirmPassword" type="password" show-password autocomplete="new-password" />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="passwordDialogVisible = false">取消</el-button>
-        <el-button type="primary" :loading="changing" @click="submitChangePassword">确认修改</el-button>
-      </template>
-    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 
-import {
-  changePassword,
-  getAuthStatus,
-  login,
-  setupAccount,
-  type AuthStatus,
-} from '@/api/auth'
+import { getAuthStatus, login, setupAccount, type AuthStatus } from '@/api/auth'
 
 const route = useRoute()
 const router = useRouter()
@@ -103,10 +75,6 @@ const username = ref('')
 const password = ref('')
 const confirmPassword = ref('')
 const submitting = ref(false)
-
-const passwordDialogVisible = ref(false)
-const changing = ref(false)
-const changeForm = reactive({ oldPassword: '', newPassword: '', confirmPassword: '' })
 
 onMounted(async () => {
   try {
@@ -155,31 +123,6 @@ async function submit() {
     ElMessage.error((error as Error).message)
   } finally {
     submitting.value = false
-  }
-}
-
-async function submitChangePassword() {
-  if (changing.value) return
-  if (!changeForm.oldPassword || changeForm.newPassword.length < 8) {
-    ElMessage.warning('请填写旧密码，新密码至少 8 位')
-    return
-  }
-  if (changeForm.newPassword !== changeForm.confirmPassword) {
-    ElMessage.warning('两次输入的新密码不一致')
-    return
-  }
-  changing.value = true
-  try {
-    await changePassword(changeForm.oldPassword, changeForm.newPassword)
-    ElMessage.success('密码已修改，全部会话已吊销，请用新密码重新登录')
-    passwordDialogVisible.value = false
-    changeForm.oldPassword = ''
-    changeForm.newPassword = ''
-    changeForm.confirmPassword = ''
-  } catch (error) {
-    ElMessage.error((error as Error).message)
-  } finally {
-    changing.value = false
   }
 }
 </script>
@@ -233,10 +176,5 @@ async function submitChangePassword() {
 
 .submit {
   width: 100%;
-}
-
-.aux-actions {
-  margin-top: 12px;
-  text-align: center;
 }
 </style>
