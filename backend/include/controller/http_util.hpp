@@ -1,7 +1,8 @@
 #pragma once
 
-// HTTP 层公共工具：统一 JSON 响应包装、CORS 头、控制器异常处理、
+// HTTP 层公共工具：统一 JSON 响应包装、控制器异常处理、
 // 路径参数与查询参数解析（查询参数经 request.url_params.get() 读取）。
+// 前端与 API 同源部署（开发走 Vite 代理），因此不再附加任何 CORS 头。
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -16,13 +17,10 @@
 
 namespace wt::http {
 
-// 构造统一 JSON 响应并统一附加 CORS 头（允许任意来源与常用方法与请求头）。
+// 构造统一 JSON 响应。
 inline crow::response make_json_response(int http_status, std::string body) {
   crow::response response(http_status, std::move(body));
   response.set_header("Content-Type", "application/json; charset=utf-8");
-  response.set_header("Access-Control-Allow-Origin", "*");
-  response.set_header("Access-Control-Allow-Headers", "Content-Type, Authorization");
-  response.set_header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
   return response;
 }
 

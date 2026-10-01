@@ -5,6 +5,8 @@
 
 #include "crow.h"
 
+#include "controller/auth_middleware.hpp"
+
 namespace wt {
 
 class Database;
@@ -17,7 +19,7 @@ class DatabaseController {
         database_path_(std::move(database_path)),
         migrations_dir_(std::move(migrations_dir)) {}
 
-  void register_routes(crow::SimpleApp& app);
+  void register_routes(App& app);
 
  private:
   Database& database_;

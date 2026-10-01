@@ -14,7 +14,7 @@
 
 namespace wt {
 
-void MetaController::register_routes(crow::SimpleApp& app) {
+void MetaController::register_routes(App& app) {
   // GET /api/meta：返回前端所需的全部枚举、默认分类与单位信息；
   // money.unit=minor 表示金额单位为分，rate_scale 为利率定点缩放因子。
   CROW_ROUTE(app, "/api/meta").methods("GET"_method)([this] {

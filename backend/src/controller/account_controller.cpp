@@ -31,7 +31,7 @@ AccountType resolve_account_type(const nlohmann::json& body, AccountType fallbac
 
 }  // namespace
 
-void AccountController::register_routes(crow::SimpleApp& app) {
+void AccountController::register_routes(App& app) {
   // GET /api/households/<int>/accounts：列出某家庭账户（带余额与资产数），
   // 支持查询参数 owner_member_id 过滤。
   CROW_ROUTE(app, "/api/households/<int>/accounts").methods("GET"_method)(

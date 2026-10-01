@@ -27,6 +27,8 @@ had_config=false
 had_unit=false
 activated=false
 previous_link=''
+database_path=''
+db_backup=''
 
 cleanup() {
   rm -rf -- "${stage_dir}"
@@ -38,6 +40,14 @@ rollback() {
   trap - ERR
   if [[ "${activated}" == true ]]; then
     printf 'Activation failed; restoring the previous service configuration.\n' >&2
+    systemctl stop wealth-trace.service || true
+    # 新版本重启时可能已对数据库执行迁移;若不还原,回滚后的旧程序会读到
+    # 不兼容的新 schema 而崩溃。还原部署前的在线备份(含清理 WAL/SHM 残留)。
+    if [[ -n "${db_backup}" && -f "${db_backup}" ]]; then
+      printf 'Restoring pre-deploy database from %s\n' "${db_backup}" >&2
+      rm -f -- "${database_path}" "${database_path}-wal" "${database_path}-shm"
+      install -m 600 -o wealthtrace -g wealthtrace -- "${db_backup}" "${database_path}"
+    fi
     if [[ -n "${previous_link}" ]]; then
       ln -sfn -- "${previous_link}" "${current_link}.next.$$"
       mv -Tf -- "${current_link}.next.$$" "${current_link}"
@@ -92,6 +102,9 @@ source, destination, bind_host, port = sys.argv[1:]
 with open(source, encoding='utf-8') as stream:
     config = json.load(stream)
 config.setdefault('server', {}).update(host=bind_host, port=int(port))
+# 远程部署一律强制登录鉴权:该服务承载全部家庭财务数据,不允许匿名访问。
+config.setdefault('auth', {})['mode'] = 'required'
+config['auth'].pop('allow_unauthenticated_lan', None)
 database = config.setdefault('database', {})
 database.setdefault('path', '/var/lib/wealth-trace/caiji.db')
 if not os.path.isabs(database['path']):
@@ -145,7 +158,8 @@ if [[ -f "${database_path}" ]]; then
   # by that account even when this installer runs as root. install -d also
   # repairs ownership on directories created by older releases.
   install -d -m 700 -o wealthtrace -g wealthtrace "${backup_dir}"
-  python3 - "${database_path}" "${backup_dir}/${release_id}.db" <<'PY'
+  db_backup="${backup_dir}/${release_id}.db"
+  python3 - "${database_path}" "${db_backup}" <<'PY'
 import sqlite3, sys
 source = sqlite3.connect(f'file:{sys.argv[1]}?mode=ro', uri=True)
 backup = sqlite3.connect(sys.argv[2])
@@ -153,8 +167,8 @@ source.backup(backup)
 backup.close()
 source.close()
 PY
-  chmod 600 "${backup_dir}/${release_id}.db"
-  printf 'Database backup: %s/%s.db\n' "${backup_dir}" "${release_id}"
+  chmod 600 "${db_backup}"
+  printf 'Database backup: %s\n' "${db_backup}"
 fi
 
 mv -- "${stage_dir}" "${release_dir}"
@@ -182,3 +196,7 @@ if [[ "${healthy}" != true ]]; then
 fi
 printf 'Active release: %s\n' "${release_dir}"
 systemctl --no-pager --quiet is-active wealth-trace.service
+printf '\n'
+printf '登录鉴权已启用(auth.mode=required)。\n'
+printf '首次访问 http://%s:%s 时,浏览器会引导创建管理员账号;\n' "${bind_host}" "${port}"
+printf 'MCP 使用需配置 WEALTH_TRACE_API_USER / WEALTH_TRACE_API_PASSWORD 环境变量。\n'

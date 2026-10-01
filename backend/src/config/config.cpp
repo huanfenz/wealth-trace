@@ -114,6 +114,15 @@ Config Config::load(const std::string& path) {
   }
   config.business_timezone =
       json_string(root, "business_timezone", config.business_timezone);
+  if (root.contains("auth") && root.at("auth").is_object()) {
+    const auto& auth = root.at("auth");
+    config.auth.mode = json_string(auth, "mode", config.auth.mode);
+    config.auth.allow_unauthenticated_lan =
+        json_bool(auth, "allow_unauthenticated_lan", config.auth.allow_unauthenticated_lan);
+  }
+  if (config.auth.mode != "required" && config.auth.mode != "disabled") {
+    throw std::runtime_error("config auth.mode must be 'required' or 'disabled'");
+  }
 
   // 端口必须是合法 TCP 端口，否则启动即失败。
   if (config.server.port <= 0 || config.server.port > 65535) {

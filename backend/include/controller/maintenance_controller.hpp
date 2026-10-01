@@ -3,6 +3,8 @@
 // 维护控制器声明：手动预览 / 触发每日资产维护，只做请求处理与序列化。
 #include "crow.h"
 
+#include "controller/auth_middleware.hpp"
+
 #include "service/daily_maintenance_service.hpp"
 
 namespace wt {
@@ -15,7 +17,7 @@ class MaintenanceController {
   explicit MaintenanceController(Database& database) : service_(database) {}
 
   // 注册 /api/maintenance/preview 与 /api/maintenance/run 路由。
-  void register_routes(crow::SimpleApp& app);
+  void register_routes(App& app);
 
  private:
   DailyAssetMaintenanceService service_;

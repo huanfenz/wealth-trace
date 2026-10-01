@@ -5,6 +5,8 @@ test_sources = files(
   'utils_test.cpp',
   'database_test.cpp',
   'service_test.cpp',
+  'crypto_test.cpp',
+  'auth_test.cpp',
 )
 
 test_exe = executable('wealth_trace_tests',

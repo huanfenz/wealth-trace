@@ -38,6 +38,16 @@ struct CategoryConfig {
   std::vector<std::string> expense;
 };
 
+// 鉴权配置。
+// mode: "required"（默认，登录后才能访问 API）或 "disabled"（完全不鉴权，仅限
+// 本地开发；绑定非回环地址时启动会被拒绝，除非 allow_unauthenticated_lan）。
+struct AuthConfig {
+  std::string mode = "required";
+  bool allow_unauthenticated_lan = false;
+
+  bool required() const { return mode != "disabled"; }
+};
+
 // 聚合全部配置项。
 struct Config {
   ServerConfig server;
@@ -45,6 +55,7 @@ struct Config {
   LogConfig log;
   FrontendConfig frontend;
   CategoryConfig categories;
+  AuthConfig auth;
   // 业务时区（IANA 名称）。影响「业务日期」口径：债券基金赎回日推进与可赎回状态判断。
   // 审计时间戳仍以 UTC 存储。默认 Asia/Shanghai。
   std::string business_timezone = "Asia/Shanghai";

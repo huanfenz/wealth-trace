@@ -177,7 +177,7 @@ std::int64_t check_database(sqlite3* db) {
 
 }  // namespace
 
-void DatabaseController::register_routes(crow::SimpleApp& app) {
+void DatabaseController::register_routes(App& app) {
   CROW_ROUTE(app, "/api/database/export").methods("GET"_method)([this] {
     try {
       std::scoped_lock lock(database_.mutex());
@@ -197,7 +197,6 @@ void DatabaseController::register_routes(crow::SimpleApp& app) {
       crow::response response(200, std::move(bytes));
       response.set_header("Content-Type", "application/vnd.sqlite3");
       response.set_header("Content-Disposition", "attachment; filename=wealth-trace.db");
-      response.set_header("Access-Control-Allow-Origin", "*");
       return response;
     } catch (const ApiError& error) {
       return http::fail(error.http_status(), error.code(), error.what());

@@ -149,7 +149,7 @@ bash scripts/deploy-arm64.sh --skip-build --host 192.0.2.10 --user root --port 8
 
 脚本在目标机的 `/opt/wealth-trace/releases/` 保存每次发布的后端程序、前端静态文件、数据库迁移、MCP 编译产物及生产依赖、`README.md` 和 `docs/`；`/opt/wealth-trace/current` 指向当前版本。MCP 文件位于 `/opt/wealth-trace/current/mcp/`，接入文档位于 `/opt/wealth-trace/current/docs/MCP.md`，目标机无需从 GitHub 或 npm 获取这些文件。systemd 服务使用专用 `wealthtrace` 账号，数据库保存在 `/var/lib/wealth-trace/caiji.db`，服务器配置保存在 `/etc/wealth-trace/config.json`。每次发布前会将现有 SQLite 数据库备份到 `/var/lib/wealth-trace/backups/`，启动后检查健康接口；启动失败会恢复之前的程序及服务配置。数据库迁移一旦执行，旧程序可能不兼容新结构，此时应结合备份处理数据回退。
 
-部署后可用 `ssh <SSH用户>@<服务器地址> systemctl status wealth-trace.service` 查看状态，并通过 `http://<监听地址>:<应用端口>/` 访问。服务器实际监听地址和端口保存在 `/etc/wealth-trace/config.json` 的 `server.host`、`server.port` 中；修改部署目标时，重新运行脚本并传入相应的 `--host`、`--bind`、`--port`。当前应用没有登录鉴权，请只在可信网络内开放此端口。
+部署后可用 `ssh <SSH用户>@<服务器地址> systemctl status wealth-trace.service` 查看状态，并通过 `http://<监听地址>:<应用端口>/` 访问。服务器实际监听地址和端口保存在 `/etc/wealth-trace/config.json` 的 `server.host`、`server.port` 中；修改部署目标时，重新运行脚本并传入相应的 `--host`、`--bind`、`--port`。部署脚本会强制启用登录鉴权（`auth.mode=required`）：首次访问时浏览器会引导创建管理员账号。
 
 ### 让服务器上的 Agent 安装 MCP
 
@@ -260,6 +260,8 @@ bash scripts/static_smoke.sh     # 验证后端静态托管前端
 | `server.host` | 监听地址 | `127.0.0.1` |
 | `server.port` | 监听端口 | `8080` |
 | `server.threads` | 工作线程数（Crow concurrency，最小 2） | `4` |
+| `auth.mode` | 鉴权模式：`required`（登录后访问）或 `disabled`（仅限回环地址本地开发） | `required` |
+| `auth.allow_unauthenticated_lan` | 在非回环地址上关闭鉴权的显式确认（强烈不建议） | `false` |
 | `database.path` | SQLite 文件路径 | `data/caiji.db` |
 | `database.migrations_dir` | migration 目录 | `migrations` |
 | `database.busy_timeout_ms` | 忙等待超时 | `5000` |
@@ -272,6 +274,14 @@ bash scripts/static_smoke.sh     # 验证后端静态托管前端
 | `categories.income` | 新家庭的初始收入分类 | 工资/奖金/... |
 
 分类保存于数据库，可在应用的“分类管理”页面新增、改名、停用和删除未被交易使用的分类。配置文件分类仅作为初始模板。
+
+### 鉴权说明
+
+后端默认启用登录鉴权（`auth.mode=required`）：除 `/api/health` 与 `/api/auth/*` 公开端点外，所有 API 都要求 `Authorization: Bearer <令牌>`。首次访问时浏览器会引导创建管理员账号；密码以 PBKDF2-HMAC-SHA256（200k 迭代）哈希存储，登录会话为 90 天滑动有效期（每次请求自动续期，90 天内使用过一次即无需重新登录，多设备各自独立，修改密码会吊销全部会话）。登录连续失败会触发按用户名的递增退避。
+
+仓库根目录的 `config.json` 为本地开发设置了 `"auth": {"mode": "disabled"}`，仅允许配合 `127.0.0.1` 回环绑定；绑定非回环地址且关闭鉴权时，后端会拒绝启动（除非显式设置 `auth.allow_unauthenticated_lan=true`）。`deploy-arm64.sh` 部署时会强制写入 `auth.mode=required`。
+
+注意：HTTP 为明文传输，令牌与密码在同网段内可被窃听；如需跨不可信网络访问，请在前面架设 TLS 反向代理（如 caddy/nginx）。MCP 接入需配置 `WEALTH_TRACE_API_USER` / `WEALTH_TRACE_API_PASSWORD` 环境变量（详见 docs/MCP.md）。
 
 配置文件路径可通过命令行参数或环境变量 `WEALTH_TRACE_CONFIG` 指定：
 

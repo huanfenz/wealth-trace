@@ -54,7 +54,7 @@ nlohmann::json list_query(const crow::request& request,int household,Transaction
 }
 }
 
-void TransactionController::register_routes(crow::SimpleApp& app){
+void TransactionController::register_routes(App& app){
  CROW_ROUTE(app,"/api/households/<int>/transactions").methods("GET"_method)([this](const crow::request&r,int h){return http::handle([this,&r,h]{return list_query(r,h,service_);});});
  CROW_ROUTE(app,"/api/households/<int>/transactions").methods("POST"_method)([this](const crow::request&r,int h){return http::handle([this,&r,h]{auto in=transaction_input(dto::parse_object(r.body));return dto::to_json(service_.dto(service_.create(h,in).id));});});
  CROW_ROUTE(app,"/api/households/<int>/transactions/income").methods("POST"_method)([this](const crow::request&r,int h){return http::handle([this,&r,h]{auto b=dto::parse_object(r.body);auto id=dto::require_int64(b,"asset_id");auto amount=dto::require_int64(b,"amount");auto c=dto::optional_int64(b,"category_id");Transaction t;if(c)t=service_.record_income(h,id,c,amount,body_time(b).value_or(""),body_remark(b));else t=service_.record_income(h,id,dto::optional_string(b,"category",64).value_or(""),amount,body_time(b).value_or(""),body_remark(b));return dto::to_json(service_.dto(t.id));});});

@@ -3,6 +3,8 @@
 // 统计控制器声明：只负责解析请求、调用 StatisticsService、序列化响应。
 #include "crow.h"
 
+#include "controller/auth_middleware.hpp"
+
 #include "service/statistics_service.hpp"
 
 namespace wt {
@@ -15,7 +17,7 @@ class StatisticsController {
   explicit StatisticsController(Database& database) : service_(database) {}
 
   // 注册 /api/households/<int>/statistics/... 路由。
-  void register_routes(crow::SimpleApp& app);
+  void register_routes(App& app);
 
  private:
   StatisticsService service_;

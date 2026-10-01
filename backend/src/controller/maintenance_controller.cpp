@@ -7,7 +7,7 @@
 
 namespace wt {
 
-void MaintenanceController::register_routes(crow::SimpleApp& app) {
+void MaintenanceController::register_routes(App& app) {
   // GET /api/maintenance/preview：预览按当前业务日期执行维护将产生的变更，不落库。
   CROW_ROUTE(app, "/api/maintenance/preview").methods("GET"_method)([this] {
     return http::handle([this] { return dto::to_json(service_.preview()); });

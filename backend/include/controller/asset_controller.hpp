@@ -3,6 +3,8 @@
 // 资产控制器声明：只负责解析请求、调用 AssetService、序列化响应。
 #include "crow.h"
 
+#include "controller/auth_middleware.hpp"
+
 #include "service/asset_service.hpp"
 
 namespace wt {
@@ -16,7 +18,7 @@ class AssetController {
   explicit AssetController(Database& database) : service_(database) {}
 
   // 注册 /api/households/<int>/assets 与 /api/assets/<int>... 路由。
-  void register_routes(crow::SimpleApp& app);
+  void register_routes(App& app);
 
  private:
   AssetService service_;

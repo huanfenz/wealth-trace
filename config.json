@@ -5,6 +5,9 @@
     "port": 8080,
     "threads": 4
   },
+  "auth": {
+    "mode": "disabled"
+  },
   "database": {
     "path": "data/caiji.db",
     "migrations_dir": "migrations",

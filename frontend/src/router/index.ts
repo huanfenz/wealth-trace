@@ -1,10 +1,19 @@
-// 路由配置：定义各页面路径与懒加载组件，meta.title 用于顶部标题栏展示。
+// 路由配置：定义各页面路径与懒加载组件，meta.title 用于顶部标题栏展示；
+// 全局前置守卫在后端启用鉴权且本地无会话时重定向到 /login。
 import { createRouter, createWebHistory } from 'vue-router'
+
+import { getAuthStatus, hasSession } from '@/api/auth'
 
 const router = createRouter({
   history: createWebHistory(),
   routes: [
     { path: '/', redirect: '/dashboard' }, // 根路径默认跳转总览
+    {
+      path: '/login',
+      name: 'login',
+      component: () => import('@/views/LoginView.vue'),
+      meta: { title: '登录', public: true }, // 登录页不套应用外壳
+    },
     {
       path: '/dashboard',
       name: 'dashboard',
@@ -60,6 +69,36 @@ const router = createRouter({
       meta: { title: '数据备份' },
     },
   ],
+})
+
+// 鉴权是否启用只需向后端查询一次，结果进程内缓存。
+let authEnabledCache: boolean | null = null
+let authEnabledCheck: Promise<boolean> | null = null
+
+async function isAuthEnabled(): Promise<boolean> {
+  if (authEnabledCache !== null) return authEnabledCache
+  authEnabledCheck ??= getAuthStatus()
+    .then((status) => {
+      authEnabledCache = status.enabled
+      return status.enabled
+    })
+    .catch(() => {
+      // 后端暂不可达时放行导航；若鉴权确实开启，后续请求的 401 拦截会把
+      // 用户送到登录页，行为最终收敛一致。
+      authEnabledCache = false
+      return false
+    })
+  return authEnabledCheck
+}
+
+router.beforeEach(async (to) => {
+  if (to.path === '/login' || hasSession()) {
+    return true
+  }
+  if (!(await isAuthEnabled())) {
+    return true
+  }
+  return { path: '/login', query: to.fullPath === '/' ? {} : { redirect: to.fullPath } }
 })
 
 export default router

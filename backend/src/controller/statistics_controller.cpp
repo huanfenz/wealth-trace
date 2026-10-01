@@ -28,7 +28,7 @@ int current_month() {
 
 }  // namespace
 
-void StatisticsController::register_routes(crow::SimpleApp& app) {
+void StatisticsController::register_routes(App& app) {
   // GET /api/households/<int>/statistics/overview：家庭总览，查询参数
   // year / month 缺省为当前年月。
   CROW_ROUTE(app, "/api/households/<int>/statistics/overview").methods("GET"_method)(

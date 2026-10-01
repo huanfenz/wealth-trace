@@ -6,6 +6,8 @@
 
 #include "crow.h"
 
+#include "controller/auth_middleware.hpp"
+
 #include "config/config.hpp"
 
 namespace wt {
@@ -15,7 +17,7 @@ class StaticFileController {
   explicit StaticFileController(FrontendConfig config) : config_(std::move(config)) {}
 
   // 注册 "/" 与 "/<path>" 的 GET 通配路由（须最后注册）。
-  void register_routes(crow::SimpleApp& app);
+  void register_routes(App& app);
 
  private:
   // 读取并返回指定的相对路径文件；未命中时回退 index.html（SPA）。

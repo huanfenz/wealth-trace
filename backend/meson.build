@@ -10,6 +10,7 @@ core_sources = files(
   'src/utils/term_date.cpp',
   'src/utils/maintenance_rules.cpp',
   'src/utils/strings.cpp',
+  'src/utils/crypto.cpp',
   'src/database/database.cpp',
   'src/database/statement.cpp',
   'src/database/transaction.cpp',
@@ -32,6 +33,7 @@ core_sources = files(
   'src/service/statistics_service.cpp',
   'src/service/daily_maintenance_service.cpp',
   'src/service/recurring_investment_service.cpp',
+  'src/service/auth_service.cpp',
   'src/dto/json_helpers.cpp',
   'src/dto/serialization.cpp',
   'src/controller/household_controller.cpp',
@@ -46,6 +48,7 @@ core_sources = files(
   'src/controller/maintenance_controller.cpp',
   'src/controller/recurring_investment_controller.cpp',
   'src/controller/database_controller.cpp',
+  'src/controller/auth_controller.cpp',
 )
 
 core_deps = [sqlite3_dep, crow_dep, asio_dep, nlohmann_dep, thread_dep]

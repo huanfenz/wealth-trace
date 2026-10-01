@@ -3,6 +3,8 @@
 // 家庭控制器声明：只负责解析请求、调用 HouseholdService、序列化响应。
 #include "crow.h"
 
+#include "controller/auth_middleware.hpp"
+
 #include "service/household_service.hpp"
 
 namespace wt {
@@ -15,7 +17,7 @@ class HouseholdController {
   explicit HouseholdController(Database& database) : service_(database) {}
 
   // 注册 /api/households 相关路由。
-  void register_routes(crow::SimpleApp& app);
+  void register_routes(App& app);
 
  private:
   HouseholdService service_;

@@ -14,6 +14,8 @@
 #include "config/config.hpp"
 #include "controller/account_controller.hpp"
 #include "controller/asset_controller.hpp"
+#include "controller/auth_controller.hpp"
+#include "controller/auth_middleware.hpp"
 #include "controller/category_controller.hpp"
 #include "controller/household_controller.hpp"
 #include "controller/http_util.hpp"
@@ -44,6 +46,11 @@ std::string config_path(int argc, char** argv) {
     return env;
   }
   return "config.json";
+}
+
+// 是否为回环地址（本机开发场景，允许关闭鉴权）。
+bool is_loopback(const std::string& host) {
+  return host == "127.0.0.1" || host == "::1" || host == "localhost";
 }
 
 }  // namespace
@@ -103,11 +110,27 @@ int main(int argc, char** argv) {
     log_error(std::string("recurring investment catch-up failed: ") + error.what());
   }
 
-  // 3. 创建 Crow 应用并注册路由。
-  crow::SimpleApp app;
+  // 2.2 鉴权模式硬闸：关闭鉴权只允许搭配回环地址绑定（本地开发）。
+  //     显式确认 allow_unauthenticated_lan 才可例外，且打印醒目警告。
+  if (!config.auth.required() && !is_loopback(config.server.host)) {
+    if (!config.auth.allow_unauthenticated_lan) {
+      log_critical(
+          "auth.mode=disabled only allowed on loopback; set auth.mode=required or "
+          "explicitly set auth.allow_unauthenticated_lan=true to override");
+      return 1;
+    }
+    log_warn("!!! auth disabled on non-loopback address per explicit config override !!!");
+  }
+
+  // 3. 创建 Crow 应用并注册路由。App 携带全局鉴权中间件，
+  //    所有 /api/* 请求（公开端点除外）都需携带有效的 Bearer 会话令牌。
+  App app;
   app.loglevel(crow::LogLevel::Warning);
 
-  // 健康检查路由。
+  AuthService auth_service(database, config.auth.required());
+  app.get_middleware<AuthMiddleware>().configure(auth_service, config.auth.required());
+
+  // 健康检查路由（中间件放行，供部署/监控匿名探测）。
   CROW_ROUTE(app, "/api/health").methods("GET"_method)([] {
     return http::ok(nlohmann::json{{"status", "ok"}});
   });
@@ -126,6 +149,7 @@ int main(int argc, char** argv) {
   RecurringInvestmentController investment_controller(database);
   DatabaseController database_controller(database, config.database.path,
                                          config.database.migrations_dir);
+  AuthController auth_controller(auth_service);
 
   // 先注册所有 API 路由，确保其优先于后面的静态文件通配路由。
   household_controller.register_routes(app);
@@ -139,16 +163,7 @@ int main(int argc, char** argv) {
   maintenance_controller.register_routes(app);
   investment_controller.register_routes(app);
   database_controller.register_routes(app);
-  // 任意 /api/ 路径的 CORS OPTIONS 预检请求统一返回 204。
-  CROW_ROUTE(app, "/api/<path>").methods("OPTIONS"_method)(
-      [](const crow::request&, std::string) {
-        crow::response response(204);
-        response.set_header("Access-Control-Allow-Origin", "*");
-        response.set_header("Access-Control-Allow-Headers", "Content-Type, Authorization");
-        response.set_header("Access-Control-Allow-Methods",
-                            "GET, POST, PUT, DELETE, OPTIONS");
-        return response;
-      });
+  auth_controller.register_routes(app);
 
   // 最后注册静态托管：API 路由已先注册，因此前者始终优先。
   static_controller.register_routes(app);

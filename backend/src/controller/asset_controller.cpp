@@ -174,7 +174,7 @@ AssetType require_asset_type(const nlohmann::json& body) {
 
 }  // namespace
 
-void AssetController::register_routes(crow::SimpleApp& app) {
+void AssetController::register_routes(App& app) {
   // GET /api/households/<int>/assets：列出资产聚合包，支持查询参数
   // owner_member_id 与 account_id 过滤。
   CROW_ROUTE(app, "/api/households/<int>/assets").methods("GET"_method)(

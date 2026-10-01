@@ -12,7 +12,7 @@
 
 namespace wt {
 
-void HouseholdController::register_routes(crow::SimpleApp& app) {
+void HouseholdController::register_routes(App& app) {
   // GET /api/households：列出全部家庭。
   CROW_ROUTE(app, "/api/households").methods("GET"_method)([this] {
     return http::handle([this] {

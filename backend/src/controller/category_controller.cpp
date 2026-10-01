@@ -26,7 +26,7 @@ TransactionType category_type(const std::string& value) {
 }
 }
 
-void CategoryController::register_routes(crow::SimpleApp& app) {
+void CategoryController::register_routes(App& app) {
   CROW_ROUTE(app, "/api/households/<int>/categories").methods("GET"_method)(
       [this](const crow::request& req, int household_id) {
         return http::handle([this, &req, household_id] {

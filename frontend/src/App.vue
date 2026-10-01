@@ -1,6 +1,8 @@
-<!-- 应用根组件：左侧导航菜单 + 顶部标题/家庭名，主体区域渲染路由页面。 -->
+<!-- 应用根组件：登录等公共页直接裸渲染；其余页面套左侧导航 + 顶部标题/家庭名外壳。 -->
 <template>
-  <el-container class="app-shell">
+  <router-view v-if="isPublicPage" />
+
+  <el-container v-else class="app-shell">
     <el-aside width="216px" class="aside">
       <div class="brand">
         <span class="brand-name">财迹</span>
@@ -54,7 +56,20 @@
           </el-button>
           <div class="title">{{ pageTitle }}</div>
         </div>
-        <div class="household">{{ householdName }}</div>
+        <div class="header-trailing">
+          <div class="household">{{ householdName }}</div>
+          <el-button
+            v-if="loggedIn"
+            class="logout-button"
+            text
+            :loading="loggingOut"
+            aria-label="登出"
+            @click="handleLogout"
+          >
+            <el-icon><SwitchButton /></el-icon>
+            <span class="logout-username">{{ sessionUsername }}</span>
+          </el-button>
+        </div>
       </el-header>
       <el-main>
         <div class="page">
@@ -82,19 +97,26 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Menu } from '@element-plus/icons-vue'
 
+import { getSessionUsername, hasSession, logout } from '@/api/auth'
 import { useAppStore } from '@/stores/app'
 
 const store = useAppStore()
 const route = useRoute()
+const router = useRouter()
 const menuVisible = ref(false)
 
 const activeMenu = computed(() => route.path) // 当前高亮菜单由路由路径决定
 const pageTitle = computed(() => (route.meta.title as string) ?? '财迹')
 const householdName = computed(() => store.household?.name ?? '')
+// 登录页等无外壳公共页：meta.public 标记。
+const isPublicPage = computed(() => route.meta.public === true)
+const loggedIn = computed(() => hasSession())
+const sessionUsername = computed(() => getSessionUsername())
+const loggingOut = ref(false)
 
 // 首次挂载时初始化全局数据（元数据、家庭、成员等），失败给出提示。
 onMounted(async () => {
@@ -104,6 +126,17 @@ onMounted(async () => {
     ElMessage.error((error as Error).message)
   }
 })
+
+async function handleLogout() {
+  if (loggingOut.value) return
+  loggingOut.value = true
+  try {
+    await logout()
+    await router.push('/login')
+  } finally {
+    loggingOut.value = false
+  }
+}
 </script>
 
 <style scoped>
@@ -149,6 +182,9 @@ onMounted(async () => {
 }
 
 .header-leading { display: flex; align-items: center; min-width: 0; gap: 8px; }
+.header-trailing { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.logout-button { color: #909399; padding: 4px 8px; }
+.logout-username { font-size: 13px; }
 .mobile-menu-button { display: none; flex: none; font-size: 20px; }
 
 .header .title {

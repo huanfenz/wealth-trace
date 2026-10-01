@@ -81,7 +81,7 @@ crow::response StaticFileController::serve(const std::string& relative_path) con
   return response;
 }
 
-void StaticFileController::register_routes(crow::SimpleApp& app) {
+void StaticFileController::register_routes(App& app) {
   // 根路径直接返回 index.html。
   CROW_ROUTE(app, "/").methods("GET"_method)([this] { return serve("index.html"); });
   // 其余路径按静态文件处理，未命中时由 serve 回退到 index.html。

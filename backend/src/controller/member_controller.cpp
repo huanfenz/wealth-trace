@@ -43,7 +43,7 @@ MemberStatus resolve_status(const nlohmann::json& body, MemberStatus fallback) {
 
 }  // namespace
 
-void MemberController::register_routes(crow::SimpleApp& app) {
+void MemberController::register_routes(App& app) {
   // GET /api/households/<int>/members：列出某家庭的全部成员。
   CROW_ROUTE(app, "/api/households/<int>/members").methods("GET"_method)([this](int id) {
     return http::handle([this, id] {

@@ -25,8 +25,10 @@ class ApiError : public std::runtime_error {
 namespace error_code {
 inline constexpr int kOk = 0;
 inline constexpr int kInvalidRequest = 40001;
+inline constexpr int kUnauthorized = 40101;
 inline constexpr int kNotFound = 40401;
 inline constexpr int kConflict = 40901;
+inline constexpr int kTooManyRequests = 42901;
 inline constexpr int kDatabase = 50001;
 inline constexpr int kInternal = 50002;
 }  // namespace error_code
@@ -34,6 +36,11 @@ inline constexpr int kInternal = 50002;
 // 参数校验失败（400）。
 inline ApiError invalid_request(std::string message) {
   return ApiError(error_code::kInvalidRequest, 400, std::move(message));
+}
+
+// 未认证/凭证无效（401）。
+inline ApiError unauthorized(std::string message) {
+  return ApiError(error_code::kUnauthorized, 401, std::move(message));
 }
 
 // 资源不存在（404）。
@@ -44,6 +51,11 @@ inline ApiError not_found(std::string message) {
 // 资源冲突（409），如重复创建。
 inline ApiError conflict(std::string message) {
   return ApiError(error_code::kConflict, 409, std::move(message));
+}
+
+// 请求过于频繁（429）。
+inline ApiError too_many_requests(std::string message) {
+  return ApiError(error_code::kTooManyRequests, 429, std::move(message));
 }
 
 // 数据库层错误（500）。

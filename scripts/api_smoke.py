@@ -16,12 +16,14 @@ if not BASE:
     raise SystemExit("Run this test through scripts/run_api_smoke.sh")
 
 
-def call(method, path, payload=None):
+def call(method, path, payload=None, token=None):
     data = None
     headers = {}
     if payload is not None:
         data = json.dumps(payload).encode("utf-8")
         headers["Content-Type"] = "application/json"
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
     request = urllib.request.Request(BASE + path, data=data, headers=headers, method=method)
     try:
         with urllib.request.urlopen(request, timeout=10) as response:
@@ -31,6 +33,23 @@ def call(method, path, payload=None):
     if body["code"] != 0:
         raise AssertionError(f"{method} {path} failed: {body}")
     return body["data"]
+
+
+def call_status(method, path, payload=None, token=None):
+    """Returns (http_status, parsed_body) without failing on error statuses."""
+    data = None
+    headers = {}
+    if payload is not None:
+        data = json.dumps(payload).encode("utf-8")
+        headers["Content-Type"] = "application/json"
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    request = urllib.request.Request(BASE + path, data=data, headers=headers, method=method)
+    try:
+        with urllib.request.urlopen(request, timeout=10) as response:
+            return response.status, json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as error:
+        return error.code, json.loads(error.read().decode("utf-8"))
 
 
 def backup_roundtrip():
@@ -51,6 +70,42 @@ def backup_roundtrip():
     assert result["data"]["imported"] is True
     members = call("GET", f"/api/households/{household_id}/members")
     assert all(member["id"] != marker["id"] for member in members)
+
+
+def auth_flow():
+    """鉴权专项:建号 -> 未登录 401 -> 登录 -> 带令牌访问 -> 登出后失效。"""
+    status = call("GET", "/api/auth/status")
+    assert status["enabled"] is True, status
+    assert status["initialized"] is False, status
+
+    # 未携带令牌访问业务接口 -> 401。
+    http_status, _ = call_status("GET", "/api/households")
+    assert http_status == 401, http_status
+
+    # 用户尚不存在时登录 -> 401（文案与密码错误一致，不泄露账号是否存在）。
+    http_status, _ = call_status("POST", "/api/auth/login",
+                                 {"username": "smoke-admin", "password": "wrong-password"})
+    assert http_status == 401, http_status
+
+    # 建号即登录。
+    session = call("POST", "/api/auth/setup",
+                   {"username": "smoke-admin", "password": "smoke-password-1"})
+    assert session["token"] and session["user"]["username"] == "smoke-admin", session
+
+    # 重复建号 -> 409。
+    status, _ = call_status("POST", "/api/auth/setup",
+                            {"username": "another", "password": "another-password"})
+    assert status == 409, status
+
+    # 带令牌访问业务接口 -> 200。
+    households = call("GET", "/api/households", token=session["token"])
+    assert households, households
+
+    # 登出后旧令牌失效 -> 401。
+    call("POST", "/api/auth/logout", {}, token=session["token"])
+    status, _ = call_status("GET", "/api/households", token=session["token"])
+    assert status == 401, status
+    print("Auth smoke test passed")
 
 
 def main():
@@ -140,7 +195,10 @@ def main():
 
 if __name__ == "__main__":
     try:
-        main()
+        if os.environ.get("WT_SMOKE_AUTH") == "1":
+            auth_flow()
+        else:
+            main()
     except AssertionError as error:
         print("SMOKE TEST FAILED:", error)
         sys.exit(1)

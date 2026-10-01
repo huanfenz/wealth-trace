@@ -10,7 +10,14 @@ import type { Component } from 'vue'
 
 import App from './App.vue'
 import router from './router'
+import { setUnauthorizedHandler } from './api/http'
 import './styles.css'
+
+// 任意 API 返回 401（会话过期/被吊销）时清除本地状态并回到登录页；
+// 登录相关接口的 401 由 http.ts 自行排除，不会触发跳转。
+setUnauthorizedHandler(() => {
+  router.push('/login')
+})
 
 const app = createApp(App)
 

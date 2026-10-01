@@ -39,8 +39,8 @@ class DatabaseTest : public ::testing::Test {
 // 验证迁移执行后版本号与当前迁移集一致，且重复执行幂等（不会重复应用）。
 TEST_F(DatabaseTest, MigrationCreatesSchemaAndIsIdempotent) {
   MigrationRunner runner(database_);
-  EXPECT_EQ(runner.current_version(), 13);
-  EXPECT_EQ(runner.applied().size(), 13u);
+  EXPECT_EQ(runner.current_version(), 15);
+  EXPECT_EQ(runner.applied().size(), 15u);
 
   // Running again must not re-apply anything.
   const auto applied_again = runner.run(migrations_dir());
@@ -78,9 +78,9 @@ TEST(DatabaseMigrationTest, ExistingTransactionCategoriesAreBackfilled) {
   database.exec("PRAGMA foreign_keys = ON;");
 
   const auto applied = runner.run(migrations_dir());
-  ASSERT_EQ(applied.size(), 2u);
+  ASSERT_EQ(applied.size(), 4u);
   EXPECT_EQ(applied.front(), 12);
-  EXPECT_EQ(applied.back(), 13);
+  EXPECT_EQ(applied.back(), 15);
   Statement migrated(database,
       "SELECT t.category_id, c.name, c.household_id, c.type FROM transactions t "
       "JOIN transaction_category c ON c.id = t.category_id WHERE t.id = 1;");
@@ -112,7 +112,7 @@ TEST(DatabaseMigrationTest, LegacyRowsBecomeBusinessTransactionsAndEntries) {
   catch(const std::exception& e){EXPECT_NE(std::string(e.what()).find("asset purchase transaction 5 has an ambiguous"),std::string::npos);}
   EXPECT_EQ(runner.current_version(),12);
   db.exec("UPDATE \"transaction\" SET remark='购入资产 (#3)' WHERE id=5;");
-  const auto applied=runner.run(migrations_dir());ASSERT_EQ(applied.size(),1u);
+  const auto applied=runner.run(migrations_dir());ASSERT_EQ(applied.size(),3u);
   Statement count(db,"SELECT COUNT(*) FROM transactions;");ASSERT_TRUE(count.step());EXPECT_EQ(count.get_int64(0),5);
   Statement investment(db,"SELECT id,type,action FROM transactions WHERE id=2;");ASSERT_TRUE(investment.step());EXPECT_EQ(investment.get_text(1),"INVESTMENT");EXPECT_EQ(investment.get_text(2),"BUY");
   Statement transfer(db,"SELECT id,type FROM transactions WHERE type='TRANSFER';");ASSERT_TRUE(transfer.step());EXPECT_EQ(transfer.get_int64(0),6);EXPECT_EQ(transfer.get_text(1),"TRANSFER");

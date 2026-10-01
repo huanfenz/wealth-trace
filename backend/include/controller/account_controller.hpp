@@ -3,6 +3,8 @@
 // 账户控制器声明：只负责解析请求、调用 AccountService、序列化响应。
 #include "crow.h"
 
+#include "controller/auth_middleware.hpp"
+
 #include "service/account_service.hpp"
 
 namespace wt {
@@ -15,7 +17,7 @@ class AccountController {
   explicit AccountController(Database& database) : service_(database) {}
 
   // 注册 /api/households/<int>/accounts 与 /api/accounts/<int> 路由。
-  void register_routes(crow::SimpleApp& app);
+  void register_routes(App& app);
 
  private:
   AccountService service_;

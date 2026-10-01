@@ -3,6 +3,10 @@ import { serveStdio } from '@modelcontextprotocol/server/stdio';
 import * as z from 'zod/v4';
 
 const apiBase = (process.env.WEALTH_TRACE_API_URL ?? 'http://127.0.0.1:8080/api').replace(/\/+$/, '');
+const apiUser = process.env.WEALTH_TRACE_API_USER ?? '';
+const apiPassword = process.env.WEALTH_TRACE_API_PASSWORD ?? '';
+const credentialsHint =
+  '请在环境变量中设置 WEALTH_TRACE_API_USER 与 WEALTH_TRACE_API_PASSWORD（后端 auth.mode=required 时必需）。';
 
 type ApiEnvelope<T = unknown> = { code: number; message: string; data: T };
 
@@ -13,12 +17,17 @@ class ApiFailure extends Error {
   }
 }
 
-async function api<T = unknown>(path: string, method = 'GET', body?: unknown): Promise<T> {
-  let response: Response;
+// 会话令牌缓存：后端 90 天滑动有效期，正常情况整个进程只需登录一次。
+let sessionToken = '';
+
+async function fetchOnce(path: string, method: string, body: unknown | undefined, token: string): Promise<Response> {
   try {
-    response = await fetch(`${apiBase}${path}`, {
+    const headers: Record<string, string> = {};
+    if (body !== undefined) headers['Content-Type'] = 'application/json';
+    if (token) headers.Authorization = `Bearer ${token}`;
+    return await fetch(`${apiBase}${path}`, {
       method,
-      headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
+      headers,
       body: body === undefined ? undefined : JSON.stringify(body),
       signal: AbortSignal.timeout(15_000),
     });
@@ -26,7 +35,9 @@ async function api<T = unknown>(path: string, method = 'GET', body?: unknown): P
     const detail = error instanceof Error ? error.message : String(error);
     throw new ApiFailure(0, undefined, `无法连接财迹后端 ${apiBase}：${detail}。请先启动后端或检查 WEALTH_TRACE_API_URL。`);
   }
+}
 
+async function parseEnvelope<T>(response: Response): Promise<T> {
   let envelope: ApiEnvelope<T>;
   try {
     envelope = await response.json() as ApiEnvelope<T>;
@@ -37,6 +48,32 @@ async function api<T = unknown>(path: string, method = 'GET', body?: unknown): P
     throw new ApiFailure(response.status, envelope.code, envelope.message || response.statusText);
   }
   return envelope.data;
+}
+
+// 未配置凭据时返回空串（匿名模式，供后端关闭鉴权的开发场景）；
+// 配置了凭据则登录并缓存会话令牌。
+async function ensureLogin(): Promise<string> {
+  if (sessionToken) return sessionToken;
+  if (!apiUser || !apiPassword) return '';
+  const response = await fetchOnce('/auth/login', 'POST', { username: apiUser, password: apiPassword }, '');
+  const data = await parseEnvelope<{ token: string }>(response);
+  sessionToken = data.token;
+  return sessionToken;
+}
+
+async function api<T = unknown>(path: string, method = 'GET', body?: unknown): Promise<T> {
+  const token = await ensureLogin();
+  let response = await fetchOnce(path, method, body, token);
+  if (response.status === 401) {
+    // 会话过期或被吊销：有凭据则自动重登录并重试一次，否则给出配置提示。
+    if (!apiUser || !apiPassword) {
+      throw new ApiFailure(401, undefined, `后端要求登录，但 MCP 未配置凭据。${credentialsHint}`);
+    }
+    sessionToken = '';
+    const retryToken = await ensureLogin();
+    response = await fetchOnce(path, method, body, retryToken);
+  }
+  return parseEnvelope<T>(response);
 }
 
 type ToolOptions = {

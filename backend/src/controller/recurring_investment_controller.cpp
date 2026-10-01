@@ -20,7 +20,7 @@ RecurringInvestmentInput parse_input(const nlohmann::json& body) {
   return input;
 }
 }
-void RecurringInvestmentController::register_routes(crow::SimpleApp& app) {
+void RecurringInvestmentController::register_routes(App& app) {
   CROW_ROUTE(app,"/api/households/<int>/investment-plans").methods("GET"_method)(
       [this](int household_id){ return http::handle([this,household_id]{
         nlohmann::json rows=nlohmann::json::array();

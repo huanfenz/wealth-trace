@@ -6,6 +6,8 @@
 
 #include "crow.h"
 
+#include "controller/auth_middleware.hpp"
+
 #include "config/config.hpp"
 
 namespace wt {
@@ -17,7 +19,7 @@ class MetaController {
       : categories_(std::move(categories)) {}
 
   // 注册 /api/meta 路由。
-  void register_routes(crow::SimpleApp& app);
+  void register_routes(App& app);
 
  private:
   CategoryConfig categories_;
