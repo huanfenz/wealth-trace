@@ -1,6 +1,5 @@
 -- Replace one-row-per-asset transactions with business transactions and entries.
 -- Invalid legacy pairs/asset purchases are rejected by MigrationRunner preflight.
-PRAGMA foreign_keys = OFF;
 ALTER TABLE "transaction" RENAME TO legacy_transaction;
 
 CREATE TABLE transactions (
@@ -134,4 +133,3 @@ CREATE INDEX idx_recurring_execution_plan_date ON recurring_investment_execution
 CREATE INDEX idx_recurring_execution_transaction ON recurring_investment_execution(transaction_id);
 
 DROP TABLE legacy_transaction;
-PRAGMA foreign_keys = ON;

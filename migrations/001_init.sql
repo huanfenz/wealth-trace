@@ -10,7 +10,6 @@
 -- NOTE: `transaction` is a reserved SQL keyword, so it must always be quoted
 -- as "transaction" in SQL statements.
 
-PRAGMA foreign_keys = ON;
 
 -- ---------------------------------------------------------------------------
 -- household

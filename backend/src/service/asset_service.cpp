@@ -2,6 +2,7 @@
 #include "service/asset_service.hpp"
 
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <string>
 #include <vector>
@@ -18,6 +19,21 @@
 
 namespace wt {
 namespace {
+
+// 带溢出检查的加减法：余额运算的输入可来自极端期初值（如接近 INT64_MIN 的
+// 负债），直接运算会触发有符号溢出 UB；与交易服务保持同一套防御。
+std::int64_t checked_add(std::int64_t left, std::int64_t right) {
+  if ((right > 0 && left > std::numeric_limits<std::int64_t>::max() - right) ||
+      (right < 0 && left < std::numeric_limits<std::int64_t>::min() - right))
+    throw invalid_request("asset balance is outside the supported range");
+  return left + right;
+}
+std::int64_t checked_sub(std::int64_t left, std::int64_t right) {
+  if ((right < 0 && left > std::numeric_limits<std::int64_t>::max() + right) ||
+      (right > 0 && left < std::numeric_limits<std::int64_t>::min() + right))
+    throw invalid_request("asset balance is outside the supported range");
+  return left - right;
+}
 
 std::optional<std::string> clean_optional(const std::optional<std::string>& value,
                                           std::string_view field,
@@ -453,9 +469,9 @@ Asset AssetService::update_metadata(std::int64_t id, const std::string& name,
     validate_opening_balance(asset.asset_type, *opening_balance);
     // 无流水时 current_balance 等于 opening_balance，改期初即按差额同幅调整，
     // 维持 current_balance = opening_balance + Σdelta（此处 Σdelta 为 0）。
-    const std::int64_t delta = *opening_balance - asset.opening_balance;
+    const std::int64_t delta = checked_sub(*opening_balance, asset.opening_balance);
     asset.opening_balance = *opening_balance;
-    asset.current_balance += delta;
+    asset.current_balance = checked_add(asset.current_balance, delta);
     balance_changed = true;
   }
 
@@ -475,10 +491,10 @@ Asset AssetService::set_current_balance(std::int64_t id, std::int64_t current_ba
   std::scoped_lock lock(database_.mutex());
   Asset asset = get(id);
   validate_opening_balance(asset.asset_type, current_balance);
-  const std::int64_t delta = current_balance - asset.current_balance;
+  const std::int64_t delta = checked_sub(current_balance, asset.current_balance);
   asset.current_balance = current_balance;
   // 手工修改余额且不记流水时，将差额归入期初基准，维持 current_balance = opening_balance + Σdelta。
-  asset.opening_balance += delta;
+  asset.opening_balance = checked_add(asset.opening_balance, delta);
   asset.updated_at = time_util::now_iso8601();
 
   TransactionGuard transaction(database_);

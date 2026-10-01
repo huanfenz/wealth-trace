@@ -38,6 +38,32 @@ bool json_bool(const json& object, const char* key, bool fallback) {
   return fallback;
 }
 
+// 严格读取关键字符串字段：键存在但类型不是字符串时抛错终止启动，而不是静默
+// 回退默认值——例如 database.path 类型写错会让服务悄悄新建另一个空库。
+std::string require_json_string(const json& object, const char* key,
+                                const std::string& fallback, const char* context) {
+  if (!object.contains(key)) {
+    return fallback;
+  }
+  if (!object.at(key).is_string()) {
+    throw std::runtime_error(std::string("config ") + context + "." + key +
+                             " must be a string");
+  }
+  return object.at(key).get<std::string>();
+}
+
+// 严格读取关键整数字段：键存在但类型不是整数（含浮点与字符串数字）时抛错。
+int require_json_int(const json& object, const char* key, int fallback, const char* context) {
+  if (!object.contains(key)) {
+    return fallback;
+  }
+  if (!object.at(key).is_number_integer()) {
+    throw std::runtime_error(std::string("config ") + context + "." + key +
+                             " must be an integer");
+  }
+  return object.at(key).get<int>();
+}
+
 // 读取字符串数组字段；非数组时返回 fallback，数组内非字符串元素被忽略。
 std::vector<std::string> json_string_list(const json& object, const char* key,
                                           std::vector<std::string> fallback) {
@@ -85,16 +111,18 @@ Config Config::load(const std::string& path) {
   if (root.contains("server") && root.at("server").is_object()) {
     const auto& server = root.at("server");
     config.server.host = json_string(server, "host", config.server.host);
-    config.server.port = json_int(server, "port", config.server.port);
+    config.server.port = require_json_int(server, "port", config.server.port, "server");
     config.server.threads = json_int(server, "threads", config.server.threads);
   }
   if (root.contains("database") && root.at("database").is_object()) {
     const auto& database = root.at("database");
-    config.database.path = json_string(database, "path", config.database.path);
+    config.database.path =
+        require_json_string(database, "path", config.database.path, "database");
     config.database.migrations_dir =
         json_string(database, "migrations_dir", config.database.migrations_dir);
     config.database.busy_timeout_ms =
-        json_int(database, "busy_timeout_ms", config.database.busy_timeout_ms);
+        require_json_int(database, "busy_timeout_ms", config.database.busy_timeout_ms,
+                         "database");
     config.database.wal = json_bool(database, "wal", config.database.wal);
   }
   if (root.contains("log") && root.at("log").is_object()) {
@@ -127,6 +155,10 @@ Config Config::load(const std::string& path) {
   // 端口必须是合法 TCP 端口，否则启动即失败。
   if (config.server.port <= 0 || config.server.port > 65535) {
     throw std::runtime_error("config server.port out of range");
+  }
+  // 负的 busy_timeout 会禁用忙等待处理，并发写入下大量报 SQLITE_BUSY。
+  if (config.database.busy_timeout_ms < 0) {
+    throw std::runtime_error("config database.busy_timeout_ms must be non-negative");
   }
   // 线程数非法时静默纠正为 1，避免无谓的启动失败。
   if (config.server.threads <= 0) {

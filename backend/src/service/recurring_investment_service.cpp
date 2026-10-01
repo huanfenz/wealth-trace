@@ -5,6 +5,7 @@
 #include <mutex>
 
 #include "common/error.hpp"
+#include "common/logging.hpp"
 #include "database/database.hpp"
 #include "database/transaction.hpp"
 #include "model/enums.hpp"
@@ -118,7 +119,7 @@ RecurringInvestmentPlan RecurringInvestmentService::create(std::int64_t househol
   auto p=normalize(household_id,owner,input,first_occurrence(input.start_date,input.frequency,input.weekday,input.month_day));
   const auto now=time_util::now_iso8601(); p.created_at=now; p.updated_at=now;
   TransactionGuard tx(database_); p.id=plans_.create(p); tx.commit();
-  process_due();
+  safe_process_due();
   return *plans_.find(p.id);
 }
 
@@ -139,7 +140,7 @@ RecurringInvestmentPlan RecurringInvestmentService::update(std::int64_t id,const
   while(p.next_due_date<today) p.next_due_date=next_occurrence(p,p.next_due_date);
   p.updated_at=time_util::now_iso8601();
   TransactionGuard tx(database_); plans_.update(p); tx.commit();
-  process_due(); return *plans_.find(id);
+  safe_process_due(); return *plans_.find(id);
 }
 
 RecurringInvestmentPlan RecurringInvestmentService::set_status(std::int64_t id,const std::string& status) {
@@ -153,7 +154,7 @@ RecurringInvestmentPlan RecurringInvestmentService::set_status(std::int64_t id,c
   TransactionGuard tx(database_);
   if(status=="ACTIVE") plans_.update(p);
   plans_.set_status(id,status,time_util::now_iso8601()); tx.commit();
-  if(status=="ACTIVE") process_due();
+  if(status=="ACTIVE") safe_process_due();
   return require_plan(id);
 }
 
@@ -163,11 +164,31 @@ void RecurringInvestmentService::remove(std::int64_t id) {
   TransactionGuard tx(database_); plans_.set_status(id,"DELETED",time_util::now_iso8601()); tx.commit();
 }
 
+void RecurringInvestmentService::safe_process_due() {
+  try {
+    process_due();
+  } catch (const std::exception& error) {
+    log_error(std::string("recurring investment catch-up after user action failed: ") +
+              error.what());
+  }
+}
+
 std::int64_t RecurringInvestmentService::process_due() {
   std::scoped_lock lock(database_.mutex());
   const std::string today=time_util::business_today();
   std::int64_t count=0;
-  for(const auto& p:plans_.list_due(today)) { process_plan(p,today); ++count; }
+  for(const auto& p:plans_.list_due(today)) {
+    // 逐计划隔离：一个计划持续失败不能饿死排在它后面的其他计划，
+    // 夜间维护线程里尤其重要（异常会中断整个补跑循环）。
+    try {
+      process_plan(p,today);
+    } catch (const std::exception& error) {
+      log_error(std::string("recurring investment plan #")+std::to_string(p.id)+
+                " failed to process: "+error.what());
+      continue;
+    }
+    ++count;
+  }
   return count;
 }
 

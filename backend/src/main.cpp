@@ -1,8 +1,10 @@
 // 后端入口：加载配置 -> 打开数据库 -> 执行 migration -> 创建默认家庭 ->
 // 注册 API 路由与 CORS 预检 -> 注册静态托管 -> 启动 Crow 服务。
 #include <chrono>
+#include <condition_variable>
 #include <cstdlib>
 #include <fstream>
+#include <mutex>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -173,10 +175,20 @@ int main(int argc, char** argv) {
 
   // 4.1 每日维护调度：后台线程等到下一个「业务时区 0 点」执行一次，循环往复。
   //     只做「收敛到今天应有的状态」，不逐日回放；run_if_due 保证幂等与去重。
-  std::thread maintenance_scheduler([&database] {
-    while (true) {
+  //     线程可停止、在退出前 join：detach 版本会在 main 返回后继续使用已被
+  //     析构的 database（栈对象），关停时刻构成未定义行为。
+  std::mutex stop_mutex;
+  std::condition_variable stop_signal;
+  bool stopping = false;
+  std::thread maintenance_scheduler([&database, &stop_mutex, &stop_signal, &stopping] {
+    std::unique_lock<std::mutex> lock(stop_mutex);
+    while (!stopping) {
+      // 最长等到下一个业务 0 点；期间被停止信号唤醒则立即退出。
       const auto wait = std::chrono::seconds(time_util::seconds_until_next_business_midnight());
-      std::this_thread::sleep_for(wait);
+      if (stop_signal.wait_for(lock, wait, [&stopping] { return stopping; })) {
+        break;
+      }
+      lock.unlock();
       try {
         DailyAssetMaintenanceService maintenance(database);
         maintenance.run_if_due();
@@ -189,13 +201,23 @@ int main(int argc, char** argv) {
       } catch (const std::exception& error) {
         log_error(std::string("recurring investment run failed: ") + error.what());
       }
+      lock.lock();
     }
   });
-  maintenance_scheduler.detach();
 
   log_info("listening on http://" + config.server.host + ":" +
            std::to_string(config.server.port));
   app.concurrency(static_cast<std::uint16_t>(config.server.threads)).run();
+
+  // 服务停止后：先停掉维护线程并 join，再依次析构 database 等栈对象。
+  {
+    std::scoped_lock<std::mutex> lock(stop_mutex);
+    stopping = true;
+  }
+  stop_signal.notify_all();
+  if (maintenance_scheduler.joinable()) {
+    maintenance_scheduler.join();
+  }
 
   log_info("backend stopped");
   return 0;

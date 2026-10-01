@@ -82,7 +82,14 @@ TransactionCategory CategoryService::create(std::int64_t household_id, Transacti
     Statement s(database_, "INSERT INTO transaction_category (household_id,type,name,sort_order,active,created_at,updated_at) VALUES (?,?,?,?,1,?,?);");
     s.bind(1, household_id).bind(2, std::string(to_string(type))).bind(3, name)
       .bind(4, next).bind(5, now).bind(6, now).run();
-  } catch (const std::exception&) { throw conflict("category name already exists"); }
+  } catch (const ApiError& error) {
+    // 只把约束冲突（如重名 UNIQUE）改写为友好文案；瞬时锁竞争（503）、磁盘
+    // 错误（500）等原样透传，避免把可重试错误谎报成确定性的名称冲突。
+    if (error.code() == error_code::kConflict) {
+      throw conflict("category name already exists");
+    }
+    throw;
+  }
   const auto id = database_.last_insert_rowid();
   Statement get(database_, std::string("SELECT ") + kColumns + " FROM transaction_category WHERE id = ?;");
   get.bind(1, id); get.step(); return map_category(get);
@@ -105,7 +112,12 @@ TransactionCategory CategoryService::update(std::int64_t household_id, std::int6
     s.bind(1, name).bind(2, sort_order).bind(3, now).bind(4, id).run();
     Statement update_tx(database_, "UPDATE transactions SET category = ?, updated_at = ? WHERE category_id = ?;");
     update_tx.bind(1, name).bind(2, now).bind(3, id).run();
-  } catch (const std::exception&) { throw conflict("category name already exists"); }
+  } catch (const ApiError& error) {
+    if (error.code() == error_code::kConflict) {
+      throw conflict("category name already exists");
+    }
+    throw;
+  }
   tx.commit();
   Statement get(database_, std::string("SELECT ") + kColumns + " FROM transaction_category WHERE id = ?;");
   get.bind(1, id); get.step(); return map_category(get);
@@ -133,7 +145,10 @@ void CategoryService::remove(std::int64_t household_id, std::int64_t id) {
     Statement category(database_, "SELECT type FROM transaction_category WHERE id = ? AND household_id = ?;");
     category.bind(1, id).bind(2, household_id);
     if (!category.step()) throw not_found("category not found");
-    type = parse_transaction_type(category.get_text(0)).value();
+    // 导入的外部库可能含未知枚举值；显式报错而不是 bad_optional_access 崩溃。
+    const auto parsed = parse_transaction_type(category.get_text(0));
+    if (!parsed) throw database_error("category row has unknown type value");
+    type = *parsed;
   }
   // Ensure deleting an initial category cannot cause it to be seeded again on the next list.
   seed_defaults(household_id, type);

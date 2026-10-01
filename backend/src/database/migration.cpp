@@ -3,6 +3,7 @@
 // 迁移实现：扫描迁移目录、解析版本号、按版本升序在各自事务中执行并记录。
 
 #include <algorithm>
+#include <cctype>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -239,6 +240,21 @@ std::vector<std::int64_t> MigrationRunner::run(const std::string& migrations_dir
     }
     log_info("applying migration " + migration.name);
     const std::string sql = read_file(migration.path);
+    // 迁移整文件在事务内执行，而 SQLite 在事务内会静默忽略 PRAGMA foreign_keys——
+    // 与其让写了却不生效的开关制造虚假安全感，不如启动时直接报错拒绝。
+    {
+      std::string lowered;
+      lowered.reserve(sql.size());
+      for (const char c : sql) {
+        lowered.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
+      }
+      if (lowered.find("pragma foreign_keys") != std::string::npos) {
+        throw std::runtime_error(
+            "migration " + migration.name +
+            " contains 'PRAGMA foreign_keys', which is a silent no-op inside the "
+            "per-migration transaction; restructure the migration instead");
+      }
+    }
     // 每个迁移一个独立事务：SQL 执行与版本记录要么一起成功，要么一起回滚。
     TransactionGuard transaction(database_);
     try {

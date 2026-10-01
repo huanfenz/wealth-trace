@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 
+#include "common/error.hpp"
 #include "database/database.hpp"
 #include "database/statement.hpp"
 
@@ -448,7 +449,10 @@ std::optional<CommercialPensionDetail> AssetRepository::find_commercial_pension_
   detail.asset_id = statement.get_int64(0);
   detail.purchase_time = statement.get_text(1);
   detail.holding_period_value = statement.get_int64(2);
-  detail.holding_period_unit = *parse_term_unit(statement.get_text(3));
+  // 导入的外部库可能含未知枚举值；显式报错而不是解引用空 optional 崩溃。
+  const auto unit = parse_term_unit(statement.get_text(3));
+  if (!unit) throw database_error("commercial pension detail has unknown holding_period_unit");
+  detail.holding_period_unit = *unit;
   detail.reservation_window_start = statement.get_optional_text(4);
   detail.reservation_window_end = statement.get_optional_text(5);
   detail.redeem_at_maturity = statement.get_bool(6);

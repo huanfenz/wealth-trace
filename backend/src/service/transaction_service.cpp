@@ -38,14 +38,31 @@ Transaction TransactionService::record_single(std::int64_t household,Transaction
   in.entries.push_back({asset,direction,magnitude(amount)});return create(household,in);
 }
 Transaction TransactionService::record_income(std::int64_t h,std::int64_t a,const std::optional<std::int64_t>& c,std::int64_t n,const std::string& t,const std::optional<std::string>& r){return record_single(h,TransactionType::Income,a,c,n,t,r);}
-Transaction TransactionService::record_income(std::int64_t h,std::int64_t a,const std::string& c,std::int64_t n,const std::string& t,const std::optional<std::string>& r){std::optional<std::int64_t> id;if(!strings::is_blank(c)){std::scoped_lock l(database_.mutex());Statement s(database_,"SELECT id FROM transaction_category WHERE household_id=? AND type='INCOME' AND name=? AND active=1;");s.bind(1,h).bind(2,strings::require_text(c,"category",64));if(s.step())id=s.get_int64(0);else{const auto now=time_util::now_iso8601();Statement add(database_,"INSERT INTO transaction_category(household_id,type,name,sort_order,active,created_at,updated_at) VALUES(?,'INCOME',?,0,1,?,?);");add.bind(1,h).bind(2,c).bind(3,now).bind(4,now).run();id=database_.last_insert_rowid();}}return record_income(h,a,id,n,t,r);}
+Transaction TransactionService::record_income(std::int64_t h,std::int64_t a,const std::string& c,std::int64_t n,const std::string& t,const std::optional<std::string>& r){
+  if(strings::is_blank(c))return record_income(h,a,std::optional<std::int64_t>(),n,t,r);
+  TransactionInput in;in.type=TransactionType::Income;in.category_name=c;in.transaction_time=t;in.remark=r;
+  in.entries.push_back({a,TransactionDirection::In,magnitude(n)});return create(h,in);}
 Transaction TransactionService::record_expense(std::int64_t h,std::int64_t a,const std::optional<std::int64_t>& c,std::int64_t n,const std::string& t,const std::optional<std::string>& r){return record_single(h,TransactionType::Expense,a,c,n,t,r);}
-Transaction TransactionService::record_expense(std::int64_t h,std::int64_t a,const std::string& c,std::int64_t n,const std::string& t,const std::optional<std::string>& r){std::optional<std::int64_t> id;if(!strings::is_blank(c)){std::scoped_lock l(database_.mutex());Statement s(database_,"SELECT id FROM transaction_category WHERE household_id=? AND type='EXPENSE' AND name=? AND active=1;");s.bind(1,h).bind(2,strings::require_text(c,"category",64));if(s.step())id=s.get_int64(0);else{const auto now=time_util::now_iso8601();Statement add(database_,"INSERT INTO transaction_category(household_id,type,name,sort_order,active,created_at,updated_at) VALUES(?,'EXPENSE',?,0,1,?,?);");add.bind(1,h).bind(2,c).bind(3,now).bind(4,now).run();id=database_.last_insert_rowid();}}return record_expense(h,a,id,n,t,r);}
+Transaction TransactionService::record_expense(std::int64_t h,std::int64_t a,const std::string& c,std::int64_t n,const std::string& t,const std::optional<std::string>& r){
+  if(strings::is_blank(c))return record_expense(h,a,std::optional<std::int64_t>(),n,t,r);
+  TransactionInput in;in.type=TransactionType::Expense;in.category_name=c;in.transaction_time=t;in.remark=r;
+  in.entries.push_back({a,TransactionDirection::Out,magnitude(n)});return create(h,in);}
 Transaction TransactionService::record_adjustment(std::int64_t h,std::int64_t a,std::int64_t n,const std::string& t,const std::optional<std::string>& r){return record_single(h,TransactionType::Adjustment,a,std::nullopt,n,t,r);}
 Transaction TransactionService::transfer(std::int64_t h,std::int64_t from,std::int64_t to,std::int64_t amount,const std::string& time,const std::optional<std::string>& remark){TransactionInput in;in.type=TransactionType::Transfer;in.transaction_time=time;in.remark=remark;in.entries={{from,TransactionDirection::Out,amount},{to,TransactionDirection::In,amount}};return create(h,in);}
 Transaction TransactionService::investment_buy(std::int64_t h,std::int64_t from,std::int64_t to,std::int64_t amount,const std::string& time,const std::optional<std::string>& remark){TransactionInput in;in.type=TransactionType::Investment;in.action=InvestmentAction::Buy;in.transaction_time=time;in.remark=remark;in.entries={{from,TransactionDirection::Out,amount},{to,TransactionDirection::In,amount}};return create(h,in);}
 
 Transaction TransactionService::create(std::int64_t h,const TransactionInput& in){std::scoped_lock l(database_.mutex());return write(h,in);}
+std::int64_t TransactionService::resolve_category_locked(std::int64_t household,TransactionType type,const std::string& raw_name,std::optional<std::string>* name_out){
+  const auto name=strings::require_text(raw_name,"category",64);
+  Statement s(database_,"SELECT id,name FROM transaction_category WHERE household_id=? AND type=? AND name=? AND active=1;");
+  s.bind(1,household).bind(2,std::string(to_string(type))).bind(3,name);
+  if(s.step()){if(name_out)*name_out=s.get_text(1);return s.get_int64(0);}
+  const auto now=time_util::now_iso8601();
+  Statement add(database_,"INSERT INTO transaction_category(household_id,type,name,sort_order,active,created_at,updated_at) VALUES(?,?,?,0,1,?,?);");
+  add.bind(1,household).bind(2,std::string(to_string(type))).bind(3,name).bind(4,now).bind(5,now).run();
+  if(name_out)*name_out=name;
+  return database_.last_insert_rowid();
+}
 Transaction TransactionService::write(std::int64_t household,const TransactionInput& input,std::optional<std::int64_t> id,bool rollback_assets){
   if(input.entries.empty())throw invalid_request("transaction must contain entries");
   if(input.type==TransactionType::Income&&(input.entries.size()!=1||input.entries[0].direction!=TransactionDirection::In))throw invalid_request("income requires one IN entry");
@@ -60,7 +77,9 @@ Transaction TransactionService::write(std::int64_t household,const TransactionIn
       throw invalid_request("transfer entries must balance across distinct assets");
     if(input.type==TransactionType::Investment&&input.action!=InvestmentAction::Buy)throw invalid_request("only investment BUY is supported");
   }
-  if(input.type!=TransactionType::Income&&input.type!=TransactionType::Expense&&input.category_id)throw invalid_request("category is only valid for income or expense");
+  if(input.type!=TransactionType::Income&&input.type!=TransactionType::Expense&&(input.category_id||input.category_name))throw invalid_request("category is only valid for income or expense");
+  if(input.category_id&&input.category_name)throw invalid_request("category id and category name are mutually exclusive");
+  if(id&&input.category_name)throw invalid_request("category name lookup is only supported when creating");
   if((input.type==TransactionType::Income||input.type==TransactionType::Expense)&&input.action)throw invalid_request("action is only valid for investment");
   if(input.type!=TransactionType::Investment&&input.action)throw invalid_request("action is only valid for investment");
   Transaction tx;std::vector<TransactionEntry> old_entries;std::optional<std::int64_t> old_category_id;
@@ -88,6 +107,9 @@ Transaction TransactionService::write(std::int64_t household,const TransactionIn
     if(source.asset_type==AssetType::CommercialPension){const auto d=assets_.find_commercial_pension_detail(out->asset_id);const auto now=time_util::utc_to_business(time_util::now_iso8601());if(!d||!d->redeem_at_maturity||!d->redeem_at||now<*d->redeem_at)throw conflict("commercial pension is not yet available for redemption");}
   }
   TransactionGuard guard(database_);const auto now=tx.updated_at;
+  // 字符串分类路径：在与交易写入相同的事务内解析/创建分类，
+  // 失败一并回滚，不留孤儿分类行（此前该 INSERT 在独立锁段自动提交）。
+  if(input.category_name)tx.category_id=resolve_category_locked(household,input.type,*input.category_name,&tx.category);
   if(id){if(rollback_assets)for(const auto& old:old_entries){auto a=assets_.find_by_id(old.asset_id);if(a)assets_.update_balance(a->id,checked_add(a->current_balance,-entry_delta(old.direction,old.amount)),now);}transactions_.clear_entries(*id);Statement detail(database_,"DELETE FROM investment_transaction_details WHERE transaction_id=?;");detail.bind(1,*id).run();transactions_.update(tx);}
   else{tx.owner_member_id=selected.front().owner_member_id;tx.created_at=now;tx.status=TransactionStatus::Normal;tx.id=transactions_.create(tx);}
   if(input.type==TransactionType::Investment&&(!id||rollback_assets)){const auto out=std::find_if(input.entries.begin(),input.entries.end(),[](const auto&e){return e.direction==TransactionDirection::Out;});auto source=assets_.find_by_id(out->asset_id);if(source->current_balance<out->amount)throw conflict("source asset balance is insufficient");}

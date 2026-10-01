@@ -38,6 +38,9 @@ class RecurringInvestmentService {
   std::int64_t process_due();
 
  private:
+  // 用户操作（建/改/恢复计划）提交后同步补跑定投；补跑失败只记日志不向用户
+  // 报错——操作本身已成功，不应把批量补跑的问题伪装成本次操作的失败。
+  void safe_process_due();
   RecurringInvestmentPlan normalize(std::int64_t household_id,
       std::int64_t owner_member_id, const RecurringInvestmentInput& input,
       const std::string& first_date) const;
