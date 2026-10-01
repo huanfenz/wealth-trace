@@ -74,6 +74,13 @@
       <el-main>
         <div class="page">
           <router-view v-if="store.ready" />
+          <div v-else-if="store.initError" class="init-error">
+            <el-result icon="error" title="初始化失败" :sub-title="initErrorMessage">
+              <template #extra>
+                <el-button type="primary" @click="retryInitialize">重试</el-button>
+              </template>
+            </el-result>
+          </div>
           <el-skeleton v-else :rows="8" animated />
         </div>
       </el-main>
@@ -118,14 +125,24 @@ const loggedIn = computed(() => hasSession())
 const sessionUsername = computed(() => getSessionUsername())
 const loggingOut = ref(false)
 
-// 首次挂载时初始化全局数据（元数据、家庭、成员等），失败给出提示。
-onMounted(async () => {
+// 首次挂载时初始化全局数据（元数据、家庭、成员等），失败给出提示与重试入口。
+const initErrorMessage = ref('')
+
+async function initializeApp() {
   try {
     await store.initialize()
   } catch (error) {
-    ElMessage.error((error as Error).message)
+    initErrorMessage.value = (error as Error).message
+    ElMessage.error(initErrorMessage.value)
   }
-})
+}
+
+function retryInitialize() {
+  initErrorMessage.value = ''
+  void initializeApp()
+}
+
+onMounted(initializeApp)
 
 async function handleLogout() {
   if (loggingOut.value) return
@@ -200,6 +217,12 @@ async function handleLogout() {
 .el-main {
   background: var(--wt-bg);
   min-width: 0;
+}
+
+.init-error {
+  background: #ffffff;
+  border-radius: 8px;
+  padding: 24px 16px;
 }
 
 @media (max-width: 767px) {

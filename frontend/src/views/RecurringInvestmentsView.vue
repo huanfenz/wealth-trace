@@ -115,7 +115,7 @@ import { Plus, Refresh } from '@element-plus/icons-vue'
 import { useMobileCardInteractions } from '@/composables/useMobileCardInteractions'
 import { createInvestmentPlan, deleteInvestmentPlan, executeInvestmentPlan, listInvestmentExecutions, listInvestmentPlans, retryInvestmentExecution, setInvestmentPlanStatus, updateInvestmentPlan } from '@/api'
 import { useAppStore } from '@/stores/app'
-import { formatMoney, toMinor } from '@/utils/money'
+import { formatMoney, parseYuanToMinor } from '@/utils/money'
 import type { Asset, RecurringInvestmentExecution, RecurringInvestmentPlan } from '@/types'
 
 const store = useAppStore()
@@ -169,7 +169,8 @@ function openEdit(p: RecurringInvestmentPlan) {
 }
 function targetChanged() { if (!sourceAssets.value.some((a) => a.id === form.source_asset_id)) form.source_asset_id=sourceAssets.value[0]?.id ?? 0 }
 function requestBody() {
-  const amount=toMinor(form.amount_yuan)
+  const amount=parseYuanToMinor(form.amount_yuan)
+  if (amount === null) throw new Error('请输入有效定投金额，最多两位小数')
   if (amount <= 0) throw new Error('请输入大于 0 的定投金额')
   if (!form.target_asset_id || !form.source_asset_id) throw new Error('请选择股票基金和付款资产')
   return { target_asset_id:form.target_asset_id, source_asset_id:form.source_asset_id, amount, frequency:form.frequency,

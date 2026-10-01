@@ -26,6 +26,45 @@ export function toMinor(value: string | number): number {
   return Math.round(numeric * 100)
 }
 
+// 严格金额格式：可选负号 + 1~13 位整数 + 可选最多两位小数。
+// 拒绝 "1,234.56"、"100元"、"1e3"、"1.234" 等会被 parseFloat 静默截断的输入。
+const strictYuanPattern = /^-?\d{1,13}(?:\.\d{1,2})?$/
+// 严格百分数格式：同上但允许最多 4 位小数（利率定点为百万分之一）。
+const strictPercentPattern = /^-?\d{1,7}(?:\.\d{1,4})?$/
+
+/**
+ * 严格解析「元」金额输入为「分」：格式非法（千分位逗号、单位后缀、科学计数、
+ * 超过两位小数）或超出安全整数范围时返回 null；0 与负数是否合法由调用方的
+ * 业务规则判断。所有用户输入入口应使用本函数而非 toMinor，避免静默记错账。
+ */
+export function parseYuanToMinor(input: string): number | null {
+  const text = input.trim()
+  if (!strictYuanPattern.test(text)) {
+    return null
+  }
+  const amount = toMinor(text)
+  if (!Number.isSafeInteger(amount)) {
+    return null
+  }
+  return amount
+}
+
+/**
+ * 严格解析百分数输入为定点利率整数（18500 表示 1.85%）：格式非法或超出
+ * 安全整数范围时返回 null。
+ */
+export function parsePercentToScaled(input: string): number | null {
+  const text = input.trim()
+  if (!strictPercentPattern.test(text)) {
+    return null
+  }
+  const scaled = percentToScaled(text)
+  if (!Number.isSafeInteger(scaled)) {
+    return null
+  }
+  return scaled
+}
+
 /** 将「分」转换为适合表单回填的「元」字符串（保留两位小数）。 */
 export function toYuanInput(minor: number): string {
   return (minor / 100).toFixed(2)

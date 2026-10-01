@@ -362,7 +362,7 @@ import {
 } from '@/api'
 import { useAppStore } from '@/stores/app'
 import { assetStatusLabels, assetTypeLabels, holdingModeLabels, termUnitLabels } from '@/utils/labels'
-import { percentToScaled, scaledToPercent, toMinor, toYuanInput } from '@/utils/money'
+import { parsePercentToScaled, parseYuanToMinor, scaledToPercent, toYuanInput } from '@/utils/money'
 import type { Asset, AssetStatus, AssetType, HoldingMode, TermUnit } from '@/types'
 
 const store = useAppStore()
@@ -751,11 +751,24 @@ async function openAppend(selected: Asset) {
   dialogVisible.value = true
 }
 
+// 严格解析利率/金额输入：格式非法直接抛错（由 save() 的 catch 统一展示），
+// 拒绝 "1,234.56"、"1e3"、"1.234" 等会被 parseFloat 静默截断的输入。
+function requireScaledRate(input: string, label: string): number {
+  const scaled = parsePercentToScaled(input)
+  if (scaled === null) throw new Error(`请输入有效的${label}，最多四位小数`)
+  return scaled
+}
+function requireMinorAmount(input: string, label: string): number {
+  const minor = parseYuanToMinor(input)
+  if (minor === null) throw new Error(`请输入有效的${label}，最多两位小数`)
+  return minor
+}
+
 // 根据资产类型把明细表单组装为后端所需 payload：金额转「分」，利率转定点整数；无明细类型返回 null。
 function buildDetail(type: AssetType): Record<string, unknown> | null {
   if (type === 'TERM_DEPOSIT') {
     return {
-      annual_interest_rate: percentToScaled(detail.annual_interest_rate_percent || '0'),
+      annual_interest_rate: requireScaledRate(detail.annual_interest_rate_percent || '0', '年利率'),
       start_date: detail.start_date || null,
       maturity_date: detail.maturity_date || null,
       term_value: detail.term_value ?? null,
@@ -775,7 +788,7 @@ function buildDetail(type: AssetType): Record<string, unknown> | null {
       expected_annual_yield_rate:
         detail.bf_expected_annual_yield_percent === ''
           ? null
-          : percentToScaled(detail.bf_expected_annual_yield_percent),
+          : requireScaledRate(detail.bf_expected_annual_yield_percent, '预期年化收益率'),
       purchase_date: detail.bf_purchase_date,
       holding_mode: detail.bf_holding_mode,
       holding_period_days: detail.bf_holding_period_days ?? 0,
@@ -790,8 +803,8 @@ function buildDetail(type: AssetType): Record<string, unknown> | null {
       insurance_company: detail.insurance_company || null,
       product_name: detail.product_name || null,
       effective_date: detail.effective_date || null,
-      annual_premium: toMinor(detail.annual_premium_yuan),
-      insured_amount: toMinor(detail.insured_amount_yuan),
+      annual_premium: requireMinorAmount(detail.annual_premium_yuan || '0', '年保费'),
+      insured_amount: requireMinorAmount(detail.insured_amount_yuan || '0', '保额'),
     }
   }
   if (type === 'FLEXIBLE_TERM') {
@@ -845,16 +858,20 @@ async function save() {
     ElMessage.warning('请选择买入时间')
     return
   }
+  const openingBalance = parseYuanToMinor(form.opening_balance_yuan)
+  if (openingBalance === null) {
+    ElMessage.warning('请输入有效金额，最多两位小数')
+    return
+  }
   saving.value = true
   try {
-    const openingBalance = toMinor(form.opening_balance_yuan)
     if (!editing.value && form.payment_asset_id && openingBalance <= 0) {
       ElMessage.warning('选择支付资产时，请填写大于零的金额')
       return
     }
     const detailPayload = buildDetail(form.asset_type)
     if (editing.value) {
-      const balance = toMinor(form.opening_balance_yuan)
+      const balance = openingBalance
       const balanceDelta = balance - editing.value.current_balance
       let createAdjustment = false
       if (balanceDelta !== 0) {
@@ -927,6 +944,17 @@ async function save() {
   }
 }
 
+// HTML 转义：这些确认框需要 <br/> 换行而启用 dangerouslyUseHTMLString，
+// 所有插值（尤其资产名等自由文本）必须先转义，防止存储型 XSS。
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
 // 组装维护变更的展示文案：字段中文名 + 推进前后值，多行用 <br/> 拼接。
 function maintenanceLines(
   changes: { field: string; before: string; after: string; asset_name?: string }[],
@@ -934,9 +962,10 @@ function maintenanceLines(
 ): string {
   return changes
     .map((c) => {
-      const label = maintenanceFieldLabels[c.field] ?? c.field
-      const prefix = withAssetName && c.asset_name ? `${c.asset_name} · ` : ''
-      return `${prefix}${label}：${c.before} → ${c.after}`
+      const label = escapeHtml(maintenanceFieldLabels[c.field] ?? c.field)
+      const prefix =
+        withAssetName && c.asset_name ? `${escapeHtml(c.asset_name)} · ` : ''
+      return `${prefix}${label}：${escapeHtml(c.before)} → ${escapeHtml(c.after)}`
     })
     .join('<br/>')
 }

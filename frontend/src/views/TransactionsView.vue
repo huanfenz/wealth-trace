@@ -264,7 +264,7 @@ import {
 import { useAppStore } from '@/stores/app'
 import { useMobileCardInteractions } from '@/composables/useMobileCardInteractions'
 import { transactionTypeLabels } from '@/utils/labels'
-import { formatMoney, toMinor, toYuanInput } from '@/utils/money'
+import { formatMoney, parseYuanToMinor, toMinor, toYuanInput } from '@/utils/money'
 import type { Transaction, TransactionEntry, TransactionType } from '@/types'
 
 type DialogKind = 'income' | 'expense' | 'transfer' | 'adjustment' // 弹窗形态
@@ -509,9 +509,13 @@ function openDialog(next: DialogKind) {
   dialogVisible.value = true
 }
 
-// 校验金额（非调整须为正、调整不得为 0），按形态调用对应接口，成功后刷新列表与资产缓存。
+// 校验金额（严格格式：非调整须为正、调整不得为 0），按形态调用对应接口，成功后刷新列表与资产缓存。
 async function submit() {
-  const amount = toMinor(form.amount_yuan) // 元 -> 分
+  const amount = parseYuanToMinor(form.amount_yuan) // 元 -> 分，格式非法返回 null
+  if (amount === null) {
+    ElMessage.warning('请输入有效金额，最多两位小数')
+    return
+  }
   if (kind.value !== 'adjustment' && amount <= 0) {
     ElMessage.warning('请输入正确的金额')
     return

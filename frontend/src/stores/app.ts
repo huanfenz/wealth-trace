@@ -6,12 +6,14 @@ import type { Account, Asset, Household, Member, Meta, TransactionCategory } fro
 export const useAppStore = defineStore('app', {
   state: () => ({
     ready: false,                       // 是否已完成初始化
+    initError: false,                   // 初始化失败（配合 App.vue 的重试按钮）
     household: null as Household | null, // 当前家庭
     members: [] as Member[],            // 成员列表
     meta: null as Meta | null,          // 全局元数据
     accounts: [] as Account[],          // 账户列表
     assets: [] as Asset[],              // 资产列表
     categories: [] as TransactionCategory[],
+    initPromise: null as Promise<void> | null, // 进行中的初始化（并发去重）
   }),
   getters: {
     // 当前家庭 ID；未初始化时返回 0。
@@ -44,10 +46,24 @@ export const useAppStore = defineStore('app', {
   },
   actions: {
     // 首次初始化：加载元数据与家庭，若不存在家庭则自动创建一个，并加载成员。
-    async initialize() {
+    // 用 initPromise 去重并发调用（避免竞态创建出两个「我的家庭」）；失败时
+    // 清空 promise 并置 initError，允许用户重试而不是永久卡在骨架屏。
+    initialize(): Promise<void> {
       if (this.ready) {
-        return
+        return Promise.resolve()
       }
+      if (!this.initPromise) {
+        this.initError = false
+        this.initPromise = this.doInitialize()
+          .catch((error: unknown) => {
+            this.initPromise = null
+            this.initError = true
+            throw error
+          })
+      }
+      return this.initPromise
+    },
+    async doInitialize() {
       this.meta = await api.getMeta()
       const households = await api.listHouseholds()
       this.household =

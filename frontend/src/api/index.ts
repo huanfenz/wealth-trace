@@ -23,14 +23,17 @@ import type {
   DailyTransactionCount,
 } from '@/types'
 
+// 数据库导出/导入是同步执行的重操作（完整性检查 + 迁移 + 整库拷贝，上限 100 MiB），
+// 不受全局 15s 超时约束：超时会让 UI 误报失败，而后端仍在继续替换数据库。
 export async function exportDatabase(): Promise<Blob> {
-  const response = await http.get('/database/export', { responseType: 'blob' })
+  const response = await http.get('/database/export', { responseType: 'blob', timeout: 0 })
   return response.data as Blob
 }
 
 export async function importDatabase(file: File): Promise<{ imported: boolean; schema_version: number }> {
   const response = await http.post('/database/import', file, {
     headers: { 'Content-Type': 'application/vnd.sqlite3' },
+    timeout: 0,
   })
   const envelope = response.data
   if (!envelope || envelope.code !== 0) {
